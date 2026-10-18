@@ -40,12 +40,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_bills_branch_id'), 'bills', ['branch_id'], unique=False)
     op.create_index(op.f('ix_bills_order_id'), 'bills', ['order_id'], unique=True)
     op.create_index(op.f('ix_bills_payment_status'), 'bills', ['payment_status'], unique=False)
-    op.alter_column('dining_sessions', 'token',
-               existing_type=sa.VARCHAR(length=128),
-               type_=sa.String(length=64),
-               existing_nullable=False)
-    op.drop_index(op.f('ix_dining_sessions_closed_at'), table_name='dining_sessions')
-    op.drop_index(op.f('ix_dining_sessions_expires_at'), table_name='dining_sessions')
+    
     # ### end Alembic commands ###
 
 
