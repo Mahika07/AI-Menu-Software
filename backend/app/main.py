@@ -67,16 +67,19 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "https://ai-menu-software.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 allowed_hosts = (
-    ["localhost", "127.0.0.1"]
+    ["localhost", "127.0.0.1", "testserver"]
     if settings.ENVIRONMENT != "production"
-    else [settings.API_HOST]
+    else [
+        settings.API_HOST,
+        "*.onrender.com",
+    ]
 )
 
 app.add_middleware(
