@@ -1,0 +1,1634 @@
+/* =========================================================
+   SMART MENU — PAGES THEME
+   Loaded after dashboard-theme.css. Brings every page inside
+   the dashboard layout (Restaurants, Branches, Menu, Tables,
+   Orders, Kitchen, Bills, Reviews, Analytics ...) into the same
+   blue glass look and makes them responsive.
+   Everything is scoped to .dashboard-layout so public pages
+   (customer menu, track order, login) are not affected.
+========================================================= */
+
+@keyframes dx-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- Page shells: let the gradient show through ---------- */
+.dashboard-layout .management-page,
+.dashboard-layout .menu-page,
+.dashboard-layout .page,
+.dashboard-layout .orders-page,
+.dashboard-layout .kitchen-page,
+.dashboard-layout .bills-page,
+.dashboard-layout .dining-page,
+.dashboard-layout .owner-reviews-page,
+.dashboard-layout .analytics-page,
+.dashboard-layout .sales-page,
+.dashboard-layout .revenue-page,
+.dashboard-layout .menu-import-container {
+  min-height: 0;
+  background: transparent;
+}
+
+.dashboard-layout .management-container,
+.dashboard-layout .menu-management-container,
+.dashboard-layout .page,
+.dashboard-layout .bills-page,
+.dashboard-layout .dining-page,
+.dashboard-layout .owner-reviews-page,
+.dashboard-layout .analytics-page,
+.dashboard-layout .sales-page,
+.dashboard-layout .revenue-page,
+.dashboard-layout .kitchen-page,
+.dashboard-layout .orders-page {
+  padding: 24px 28px 48px 0;
+  max-width: 1280px;
+  margin: 0;
+}
+
+/* Pages that nest .page inside .orders-page / .kitchen-page */
+.dashboard-layout .orders-page > .page,
+.dashboard-layout .kitchen-page > .page {
+  padding: 0;
+}
+
+.dashboard-layout .menu-import-container {
+  max-width: 1100px;
+  padding: 24px 28px 48px 0;
+}
+
+/* ---------- Management header (Restaurants / Branches / Menu ...) ---------- */
+.dashboard-layout .management-header {
+  position: static;
+  min-height: 0;
+  margin: 24px 28px 0 0;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--dx-card);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  backdrop-filter: blur(16px) saturate(1.2);
+  border: 1px solid var(--dx-card-edge);
+  border-radius: 20px;
+  box-shadow: var(--dx-shadow);
+}
+
+.dashboard-layout .management-header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.dashboard-layout .management-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dashboard-layout .management-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.dashboard-layout .management-brand-icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 13px;
+  background: linear-gradient(135deg, var(--dx-navy), var(--dx-sky));
+  color: #fff;
+  box-shadow: 0 8px 16px rgba(20, 52, 74, 0.22);
+}
+
+.dashboard-layout .management-brand strong {
+  display: block;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--dx-ink);
+}
+
+.dashboard-layout .management-brand span {
+  display: block;
+  font-size: 12px;
+  color: var(--dx-muted);
+}
+
+.dashboard-layout .management-container,
+.dashboard-layout .menu-management-container {
+  padding-top: 22px;
+}
+
+/* ---------- Page titles ---------- */
+.dashboard-layout .management-title,
+.dashboard-layout .page-header,
+.dashboard-layout .bills-header,
+.dashboard-layout .dining-header,
+.dashboard-layout .owner-reviews-header,
+.dashboard-layout .analytics-header,
+.dashboard-layout .sales-page-header,
+.dashboard-layout .revenue-header,
+.dashboard-layout .kitchen-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.dashboard-layout .management-title h1,
+.dashboard-layout .page-header h1,
+.dashboard-layout .bills-header h1,
+.dashboard-layout .dining-header h1,
+.dashboard-layout .owner-reviews-header h1,
+.dashboard-layout .analytics-header h1,
+.dashboard-layout .sales-page-header h1,
+.dashboard-layout .revenue-header h1,
+.dashboard-layout .kitchen-header h1,
+.dashboard-layout .menu-page-title {
+  margin: 0;
+  font-size: clamp(26px, 3.4vw, 34px);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+  color: var(--dx-ink);
+}
+
+.dashboard-layout .management-title p,
+.dashboard-layout .page-header p,
+.dashboard-layout .bills-subtitle,
+.dashboard-layout .dining-header p,
+.dashboard-layout .owner-reviews-header p,
+.dashboard-layout .analytics-header p,
+.dashboard-layout .sales-page-header p,
+.dashboard-layout .revenue-subtitle,
+.dashboard-layout .kitchen-header p {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--dx-muted);
+}
+
+.dashboard-layout .bills-eyebrow,
+.dashboard-layout .dining-eyebrow,
+.dashboard-layout .sales-eyebrow,
+.dashboard-layout .revenue-eyebrow {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--dx-blue);
+}
+
+.dashboard-layout .item-count {
+  align-self: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(31, 106, 154, 0.1);
+  color: var(--dx-blue);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.dashboard-layout .page-header-actions,
+.dashboard-layout .bills-header-actions,
+.dashboard-layout .revenue-header-actions,
+.dashboard-layout .analytics-header-actions,
+.dashboard-layout .owner-reviews-header-actions,
+.dashboard-layout .kitchen-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ---------- Glass cards (shared) ---------- */
+.dashboard-layout .restaurant-card,
+.dashboard-layout .branch-card,
+.dashboard-layout .table-card,
+.dashboard-layout .form-card,
+.dashboard-layout .empty-state,
+.dashboard-layout .loading,
+.dashboard-layout .owner-order-card,
+.dashboard-layout .orders-summary-card,
+.dashboard-layout .orders-toolbar,
+.dashboard-layout .kitchen-toolbar,
+.dashboard-layout .kitchen-toolbar-enhanced,
+.dashboard-layout .kitchen-stat,
+.dashboard-layout .kitchen-empty,
+.dashboard-layout .kitchen-table-group,
+.dashboard-layout .bills-panel,
+.dashboard-layout .bills-summary-card,
+.dashboard-layout .dining-panel,
+.dashboard-layout .dining-stat,
+.dashboard-layout .owner-review-stat,
+.dashboard-layout .owner-reviews-section,
+.dashboard-layout .owner-review-card,
+.dashboard-layout .owner-branch-selector,
+.dashboard-layout .analytics-overview-card,
+.dashboard-layout .analytics-stat-card,
+.dashboard-layout .analytics-section,
+.dashboard-layout .analytics-review-card,
+.dashboard-layout .analytics-branch-selector,
+.dashboard-layout .sales-panel,
+.dashboard-layout .sales-metric-card,
+.dashboard-layout .sales-filters,
+.dashboard-layout .revenue-card,
+.dashboard-layout .revenue-panel,
+.dashboard-layout .revenue-filters,
+.dashboard-layout .revenue-chart-panel,
+.dashboard-layout .category-sidebar,
+.dashboard-layout .dish-management,
+.dashboard-layout .dish-admin-list > *,
+.dashboard-layout .menu-upload-card,
+.dashboard-layout .menu-review,
+.dashboard-layout .import-category,
+.dashboard-layout .import-dish-card {
+  background: var(--dx-card);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  backdrop-filter: blur(16px) saturate(1.2);
+  border: 1px solid var(--dx-card-edge);
+  border-radius: 20px;
+  box-shadow: var(--dx-shadow);
+  color: var(--dx-ink);
+}
+
+.dashboard-layout .restaurant-card:hover,
+.dashboard-layout .branch-card:hover,
+.dashboard-layout .table-card:hover {
+  transform: translateY(-2px);
+  border-color: #fff;
+  box-shadow: 0 16px 36px rgba(20, 52, 74, 0.12);
+}
+
+.dashboard-layout .empty-state,
+.dashboard-layout .loading,
+.dashboard-layout .kitchen-empty {
+  color: var(--dx-muted);
+}
+
+/* ---------- Buttons ---------- */
+.dashboard-layout .primary-button,
+.dashboard-layout .primary-action,
+.dashboard-layout .bills-export-button,
+.dashboard-layout .revenue-apply,
+.dashboard-layout .add-dish-button,
+.dashboard-layout .branch-menu-button,
+.dashboard-layout .manage-branches-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--dx-navy), var(--dx-blue));
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(20, 52, 74, 0.22);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+}
+
+.dashboard-layout .primary-button:hover:not(:disabled),
+.dashboard-layout .primary-action:hover:not(:disabled),
+.dashboard-layout .bills-export-button:hover:not(:disabled),
+.dashboard-layout .revenue-apply:hover:not(:disabled),
+.dashboard-layout .add-dish-button:hover:not(:disabled),
+.dashboard-layout .branch-menu-button:hover:not(:disabled),
+.dashboard-layout .manage-branches-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(20, 52, 74, 0.28);
+}
+
+.dashboard-layout .primary-button:disabled,
+.dashboard-layout .primary-action:disabled,
+.dashboard-layout .bills-export-button:disabled,
+.dashboard-layout .branch-menu-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.dashboard-layout .secondary-button,
+.dashboard-layout .secondary-action,
+.dashboard-layout .bills-refresh-button,
+.dashboard-layout .revenue-refresh,
+.dashboard-layout .revenue-export,
+.dashboard-layout .dining-refresh,
+.dashboard-layout .dining-back,
+.dashboard-layout .owner-reviews-refresh,
+.dashboard-layout .analytics-refresh-btn,
+.dashboard-layout .sales-refresh-button,
+.dashboard-layout .sales-clear-button,
+.dashboard-layout .kitchen-toolbar-button,
+.dashboard-layout .branch-table-button,
+.dashboard-layout .branch-secondary-actions button,
+.dashboard-layout .back-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--dx-card-edge);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--dx-navy);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.dashboard-layout .secondary-button:hover:not(:disabled),
+.dashboard-layout .secondary-action:hover:not(:disabled),
+.dashboard-layout .bills-refresh-button:hover:not(:disabled),
+.dashboard-layout .revenue-refresh:hover:not(:disabled),
+.dashboard-layout .dining-refresh:hover:not(:disabled),
+.dashboard-layout .owner-reviews-refresh:hover:not(:disabled),
+.dashboard-layout .analytics-refresh-btn:hover:not(:disabled),
+.dashboard-layout .sales-refresh-button:hover:not(:disabled),
+.dashboard-layout .kitchen-toolbar-button:hover:not(:disabled),
+.dashboard-layout .back-button:hover:not(:disabled) {
+  background: #fff;
+  box-shadow: 0 6px 16px rgba(20, 52, 74, 0.1);
+}
+
+.dashboard-layout .back-button {
+  width: auto;
+  min-width: 44px;
+  padding: 0 12px;
+}
+
+.dashboard-layout .danger-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid #f1c7c7;
+  border-radius: 14px;
+  background: #fff5f5;
+  color: #b42318;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dashboard-layout .danger-button:hover:not(:disabled) {
+  background: #ffe9e9;
+}
+
+/* Current / use-this-branch buttons */
+.dashboard-layout .branch-selected-button {
+  background: linear-gradient(135deg, var(--dx-navy), var(--dx-blue));
+  border: 0;
+  border-radius: 14px;
+  color: #fff;
+}
+
+.dashboard-layout .branch-select-button {
+  border: 1px dashed rgba(31, 106, 154, 0.45);
+  border-radius: 14px;
+  background: rgba(31, 106, 154, 0.06);
+  color: var(--dx-blue);
+}
+
+.dashboard-layout .branch-selected {
+  border-color: rgba(31, 106, 154, 0.55);
+  box-shadow: 0 0 0 3px rgba(31, 106, 154, 0.14), var(--dx-shadow);
+}
+
+/* ---------- Form controls ---------- */
+.dashboard-layout select,
+.dashboard-layout input[type="text"],
+.dashboard-layout input[type="search"],
+.dashboard-layout input[type="number"],
+.dashboard-layout input[type="email"],
+.dashboard-layout input[type="tel"],
+.dashboard-layout input[type="date"],
+.dashboard-layout input[type="url"],
+.dashboard-layout input[type="password"],
+.dashboard-layout textarea {
+  min-height: 44px;
+  border: 1px solid rgba(20, 52, 74, 0.16);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--dx-ink);
+  font: inherit;
+  font-size: 14px;
+}
+
+.dashboard-layout select:focus,
+.dashboard-layout input:focus,
+.dashboard-layout textarea:focus {
+  outline: none;
+  border-color: var(--dx-blue);
+  box-shadow: var(--dx-focus);
+}
+
+.dashboard-layout label {
+  font-weight: 600;
+  color: var(--dx-navy);
+}
+
+/* ---------- Status badges ---------- */
+.dashboard-layout .status-active,
+.dashboard-layout .status-badge,
+.dashboard-layout .status-inactive {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* ---------- Loading spinner ---------- */
+.dashboard-layout .loading-spinner {
+  border-color: rgba(31, 106, 154, 0.2);
+  border-top-color: var(--dx-blue);
+}
+
+/* =========================================================
+   RESTAURANTS
+========================================================= */
+.dashboard-layout .restaurant-grid,
+.dashboard-layout .branch-grid,
+.dashboard-layout .table-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.dashboard-layout .restaurant-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px;
+  min-width: 0;
+}
+
+.dashboard-layout .restaurant-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dashboard-layout .restaurant-logo {
+  width: 68px;
+  height: 68px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #e0eefa, #e6e9fb);
+  color: var(--dx-blue);
+}
+
+.dashboard-layout .restaurant-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.dashboard-layout .restaurant-card-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.dashboard-layout .restaurant-card-actions button,
+.dashboard-layout .branch-card-actions button,
+.dashboard-layout .card-actions button {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--dx-card-edge);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--dx-navy);
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+
+.dashboard-layout .restaurant-card-actions button:hover,
+.dashboard-layout .branch-card-actions button:hover,
+.dashboard-layout .card-actions button:hover {
+  background: #fff;
+}
+
+.dashboard-layout .restaurant-card-actions .danger-icon,
+.dashboard-layout .card-actions .danger-button,
+.dashboard-layout .branch-card-actions .danger-icon {
+  color: #b42318;
+}
+
+.dashboard-layout .restaurant-card h2 {
+  margin: 6px 0 0;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--dx-ink);
+}
+
+.dashboard-layout .restaurant-description {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--dx-muted);
+}
+
+.dashboard-layout .restaurant-location {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--dx-muted);
+}
+
+.dashboard-layout .manage-branches-button {
+  width: 100%;
+  margin-top: auto;
+}
+
+.dashboard-layout .restaurant-card .manage-branches-button {
+  margin-top: 8px;
+}
+
+/* =========================================================
+   BRANCHES
+========================================================= */
+.dashboard-layout .branch-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px;
+  min-width: 0;
+}
+
+.dashboard-layout .branch-icon,
+.dashboard-layout .table-icon {
+  background: linear-gradient(135deg, #e0eefa, #e6e9fb);
+  color: var(--dx-blue);
+  border-radius: 16px;
+}
+
+.dashboard-layout .branch-card-footer .branch-menu-button,
+.dashboard-layout .branch-card-footer .branch-table-button {
+  min-height: 42px;
+}
+
+/* =========================================================
+   TABLES & QR
+========================================================= */
+.dashboard-layout .table-card {
+  position: relative;
+  padding: 20px;
+  min-width: 0;
+}
+
+.dashboard-layout .table-card-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-right: 96px;
+}
+
+.dashboard-layout .table-card-header h2 {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--dx-ink);
+}
+
+.dashboard-layout .table-icon {
+  width: 54px;
+  height: 54px;
+  flex-shrink: 0;
+}
+
+.dashboard-layout .table-card .card-actions {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  bottom: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.dashboard-layout .qr-display {
+  margin: 18px 0;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid var(--dx-line);
+  border-radius: 18px;
+}
+
+.dashboard-layout .qr-info label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--dx-navy);
+}
+
+.dashboard-layout .qr-url {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(31, 106, 154, 0.07);
+  color: var(--dx-muted);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.dashboard-layout .table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.dashboard-layout .table-actions .secondary-button {
+  flex: 1 1 110px;
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+.dashboard-layout .form-card {
+  padding: 22px;
+  margin-bottom: 20px;
+}
+
+.dashboard-layout .form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.dashboard-layout .error-message,
+.dashboard-layout .management-error,
+.dashboard-layout .kitchen-error,
+.dashboard-layout .owner-reviews-error,
+.dashboard-layout .analytics-error,
+.dashboard-layout .sales-error,
+.dashboard-layout .revenue-error,
+.dashboard-layout .menu-import-error,
+.dashboard-layout .dining-alert.error {
+  padding: 14px 18px;
+  border: 1px solid #f3c6c6;
+  border-radius: 16px;
+  background: #fff1f1;
+  color: #a12828;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* =========================================================
+   ORDERS & KITCHEN
+========================================================= */
+.dashboard-layout .orders-toolbar,
+.dashboard-layout .kitchen-toolbar,
+.dashboard-layout .kitchen-toolbar-enhanced {
+  padding: 16px 18px;
+}
+
+.dashboard-layout .orders-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.dashboard-layout .owner-order-card {
+  overflow: hidden;
+  min-width: 0;
+}
+
+.dashboard-layout .owner-order-number {
+  color: var(--dx-blue);
+}
+
+.dashboard-layout .owner-order-actions {
+  flex-wrap: wrap;
+}
+
+.dashboard-layout .orders-summary-row,
+.dashboard-layout .kitchen-stats,
+.dashboard-layout .kitchen-stats-enhanced {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 14px;
+}
+
+.dashboard-layout .orders-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.dashboard-layout .kitchen-table-group {
+  overflow: hidden;
+}
+
+/* =========================================================
+   BILLS & RECEIPTS  (these classes had no CSS before)
+========================================================= */
+.dashboard-layout .bills-page {
+  color: var(--dx-ink);
+}
+
+.dashboard-layout .bills-header {
+  align-items: flex-end;
+}
+
+.dashboard-layout .bills-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.dashboard-layout .bills-summary-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px;
+}
+
+.dashboard-layout .bills-summary-icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  background: #e0eefa;
+  color: var(--dx-blue);
+}
+
+.dashboard-layout .bills-summary-card:nth-child(3n + 2) .bills-summary-icon {
+  background: #e6e9fb;
+  color: #4753c4;
+}
+
+.dashboard-layout .bills-summary-card:nth-child(3n + 3) .bills-summary-icon {
+  background: #dcf2f3;
+  color: #137582;
+}
+
+.dashboard-layout .bills-summary-card > div {
+  min-width: 0;
+}
+
+.dashboard-layout .bills-summary-card p {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dx-muted);
+}
+
+.dashboard-layout .bills-summary-card h2 {
+  margin: 2px 0 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--dx-ink);
+  white-space: nowrap;
+}
+
+.dashboard-layout .bills-panel {
+  padding: 20px;
+}
+
+.dashboard-layout .bills-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.dashboard-layout .bills-search {
+  flex: 1 1 280px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  padding: 0 14px;
+  border: 1px solid rgba(20, 52, 74, 0.16);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--dx-muted);
+}
+
+.dashboard-layout .bills-search:focus-within {
+  border-color: var(--dx-blue);
+  box-shadow: var(--dx-focus);
+}
+
+.dashboard-layout .bills-search input {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.dashboard-layout .bills-status-filter {
+  height: 46px;
+  min-width: 190px;
+  padding: 0 14px;
+}
+
+.dashboard-layout .bills-message {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  font-size: 14px;
+}
+
+.dashboard-layout .bills-message > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.dashboard-layout .bills-message button {
+  flex-shrink: 0;
+  padding: 7px 14px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dashboard-layout .bills-error {
+  border: 1px solid #f3c6c6;
+  background: #fff1f1;
+  color: #a12828;
+}
+
+.dashboard-layout .bills-table-wrap {
+  margin: 0 -4px;
+  padding: 0 4px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dashboard-layout .bills-table {
+  width: 100%;
+  min-width: 880px;
+  border-collapse: collapse;
+}
+
+.dashboard-layout .bills-table th {
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--dx-muted);
+  background: rgba(31, 106, 154, 0.07);
+  white-space: nowrap;
+}
+
+.dashboard-layout .bills-table th:first-child {
+  border-radius: 12px 0 0 12px;
+}
+
+.dashboard-layout .bills-table th:last-child {
+  border-radius: 0 12px 12px 0;
+}
+
+.dashboard-layout .bills-table td {
+  padding: 14px;
+  border-bottom: 1px solid var(--dx-line);
+  font-size: 14px;
+  vertical-align: middle;
+}
+
+.dashboard-layout .bills-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.dashboard-layout .bills-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.dashboard-layout .bills-table td small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--dx-muted);
+}
+
+.dashboard-layout .bills-table .bills-status-filter {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.dashboard-layout .bills-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 11px;
+  border-radius: 999px;
+  background: #e8edf1;
+  color: #475467;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.dashboard-layout .bills-status-paid {
+  background: #e3f6ea;
+  color: #1a7a43;
+}
+
+.dashboard-layout .bills-status-unpaid {
+  background: #fff1dc;
+  color: #94651b;
+}
+
+.dashboard-layout .bills-status-pending {
+  background: #e0eefa;
+  color: #1f6a9a;
+}
+
+.dashboard-layout .bills-status-refunded {
+  background: #ece9fb;
+  color: #5b45b8;
+}
+
+.dashboard-layout .bills-view-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(31, 106, 154, 0.12);
+  color: var(--dx-navy);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+
+.dashboard-layout .bills-view-button:hover:not(:disabled) {
+  background: rgba(31, 106, 154, 0.2);
+}
+
+.dashboard-layout .bills-view-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.dashboard-layout .bills-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 56px 20px;
+  text-align: center;
+  color: var(--dx-muted);
+}
+
+.dashboard-layout .bills-empty-state h3 {
+  margin: 8px 0 0;
+  font-size: 18px;
+  color: var(--dx-ink);
+}
+
+.dashboard-layout .bills-empty-state p {
+  margin: 0;
+  max-width: 34em;
+  font-size: 14px;
+}
+
+.dashboard-layout .bills-spin {
+  animation: dx-spin 1s linear infinite;
+}
+
+.dashboard-layout .bills-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--dx-line);
+}
+
+.dashboard-layout .bills-pagination-info {
+  margin: 0;
+  font-size: 14px;
+  color: var(--dx-muted);
+}
+
+.dashboard-layout .bills-pagination-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--dx-muted);
+}
+
+.dashboard-layout .bills-pagination-controls button {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--dx-card-edge);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--dx-navy);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dashboard-layout .bills-pagination-controls button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.dashboard-layout .bills-page-size select {
+  min-height: 40px;
+  padding: 0 10px;
+}
+
+/* Bill receipt page wrapper (no CSS existed) */
+.dashboard-layout .bill-receipt-page {
+  padding: 24px 28px 48px 0;
+}
+
+.dashboard-layout .bill-receipt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.dashboard-layout .receipt-payment-details,
+.dashboard-layout .receipt-unpaid-note {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--dx-muted);
+}
+
+/* =========================================================
+   DINING SESSIONS
+========================================================= */
+.dashboard-layout .dining-page {
+  display: block;
+}
+
+.dashboard-layout .dining-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.dashboard-layout .dining-panel {
+  padding: 20px;
+  margin-bottom: 14px;
+}
+
+.dashboard-layout .dining-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dashboard-layout .dining-header {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+/* =========================================================
+   REVIEWS
+========================================================= */
+.dashboard-layout .owner-reviews-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.dashboard-layout .owner-reviews-section {
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.dashboard-layout .owner-rating-fill,
+.dashboard-layout .analytics-rating-fill,
+.dashboard-layout .analytics-progress-bar {
+  background: linear-gradient(90deg, var(--dx-blue), #62b0de);
+}
+
+/* =========================================================
+   ANALYTICS / SALES / REVENUE
+========================================================= */
+.dashboard-layout .analytics-stats-grid,
+.dashboard-layout .sales-metrics-grid,
+.dashboard-layout .revenue-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.dashboard-layout .sales-lower-grid,
+.dashboard-layout .revenue-panels,
+.dashboard-layout .analytics-engagement-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.dashboard-layout .sales-filters,
+.dashboard-layout .revenue-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+
+.dashboard-layout .sales-panel,
+.dashboard-layout .revenue-panel,
+.dashboard-layout .revenue-chart-panel,
+.dashboard-layout .analytics-section {
+  padding: 20px;
+  min-width: 0;
+}
+
+.dashboard-layout .revenue-chart-panel {
+  margin-bottom: 16px;
+}
+
+.dashboard-layout .analytics-stat-content {
+  min-width: 0;
+}
+
+.dashboard-layout .sales-chart-scroll,
+.dashboard-layout .analytics-chart-wrapper,
+.dashboard-layout .revenue-table-wrap,
+.dashboard-layout .analytics-popular-table-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dashboard-layout .sales-status-row {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboard-layout .analytics-period-buttons button {
+  border-radius: 12px;
+}
+
+.dashboard-layout .revenue-bar,
+.dashboard-layout .sales-dish-bar,
+.dashboard-layout .sales-status-track {
+  background-color: rgba(20, 52, 74, 0.1);
+}
+
+
+/* Analytics stat cards: icon left, label above value */
+.dashboard-layout .analytics-stat-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+}
+
+.dashboard-layout .analytics-stat-icon {
+  flex-shrink: 0;
+}
+
+.dashboard-layout .analytics-stat-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dashboard-layout .analytics-stat-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dx-muted);
+}
+
+.dashboard-layout .analytics-stat-value {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--dx-ink);
+}
+
+/* Dining sessions heading row */
+.dashboard-layout .dining-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dashboard-layout .dining-heading-row > div {
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+/* =========================================================
+   BRANCH MENU MANAGEMENT
+========================================================= */
+.dashboard-layout .menu-management-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.dashboard-layout .category-sidebar {
+  padding: 16px;
+}
+
+.dashboard-layout .dish-management {
+  padding: 20px;
+  min-width: 0;
+}
+
+.dashboard-layout .dish-admin-list {
+  display: grid;
+  gap: 12px;
+}
+
+.dashboard-layout .dish-admin-list > * {
+  padding: 14px;
+  box-shadow: none;
+}
+
+.dashboard-layout .dish-admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dashboard-layout .category-select.active,
+.dashboard-layout .category-select.selected {
+  background: linear-gradient(135deg, var(--dx-navy), var(--dx-blue));
+  color: #fff;
+}
+
+/* =========================================================
+   MENU IMPORT  (missing classes)
+========================================================= */
+.dashboard-layout .menu-upload-card {
+  padding: 28px;
+  text-align: center;
+}
+
+.dashboard-layout .menu-upload-icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #e0eefa, #e6e9fb);
+  color: var(--dx-blue);
+}
+
+.dashboard-layout .menu-import-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--dx-muted);
+}
+
+.dashboard-layout .menu-review {
+  padding: 20px;
+}
+
+.dashboard-layout .import-dish-image-section {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 10px 0;
+}
+
+.dashboard-layout .import-dish-image-preview,
+.dashboard-layout .import-dish-image-empty {
+  width: 84px;
+  height: 84px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 16px;
+  background: rgba(31, 106, 154, 0.08);
+  color: var(--dx-muted);
+}
+
+.dashboard-layout .import-dish-image-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.dashboard-layout .import-dish-image-info {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--dx-muted);
+}
+
+.dashboard-layout .ai-generated-label {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #e6e9fb;
+  color: #4753c4;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* =========================================================
+   MODALS
+========================================================= */
+.form-modal-overlay {
+  background: rgba(15, 42, 61, 0.5);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+.form-modal,
+.dish-form-modal {
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 24px;
+  box-shadow: 0 30px 70px rgba(15, 42, 61, 0.35);
+}
+
+.form-modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
+}
+
+.modal-close {
+  border-radius: 12px;
+}
+
+/* =========================================================
+   RESPONSIVE
+========================================================= */
+@media (max-width: 1024px) {
+  .dashboard-layout .management-container,
+  .dashboard-layout .menu-management-container,
+  .dashboard-layout .page,
+  .dashboard-layout .bills-page,
+  .dashboard-layout .dining-page,
+  .dashboard-layout .owner-reviews-page,
+  .dashboard-layout .analytics-page,
+  .dashboard-layout .sales-page,
+  .dashboard-layout .revenue-page,
+  .dashboard-layout .kitchen-page,
+  .dashboard-layout .orders-page,
+  .dashboard-layout .menu-import-container,
+  .dashboard-layout .bill-receipt-page {
+    padding: 20px 20px 40px;
+  }
+
+  .dashboard-layout .management-header {
+    margin: 20px 20px 0;
+  }
+
+  .dashboard-layout .management-container,
+  .dashboard-layout .menu-management-container {
+    padding-top: 20px;
+  }
+
+  .dashboard-layout .menu-management-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 700px) {
+  .dashboard-layout .management-header {
+    margin: 14px 14px 0;
+    padding: 10px 12px;
+    border-radius: 18px;
+  }
+
+  .dashboard-layout .management-header > .primary-action,
+  .dashboard-layout .management-header > button:last-child {
+    flex: 1 1 100%;
+  }
+
+  .dashboard-layout .management-container,
+  .dashboard-layout .menu-management-container,
+  .dashboard-layout .page,
+  .dashboard-layout .bills-page,
+  .dashboard-layout .dining-page,
+  .dashboard-layout .owner-reviews-page,
+  .dashboard-layout .analytics-page,
+  .dashboard-layout .sales-page,
+  .dashboard-layout .revenue-page,
+  .dashboard-layout .kitchen-page,
+  .dashboard-layout .orders-page,
+  .dashboard-layout .menu-import-container,
+  .dashboard-layout .bill-receipt-page {
+    padding: 16px 14px 32px;
+  }
+
+  .dashboard-layout .management-title,
+  .dashboard-layout .page-header,
+  .dashboard-layout .bills-header,
+  .dashboard-layout .dining-header,
+  .dashboard-layout .owner-reviews-header,
+  .dashboard-layout .analytics-header,
+  .dashboard-layout .sales-page-header,
+  .dashboard-layout .revenue-header,
+  .dashboard-layout .kitchen-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .dashboard-layout .page-header-actions,
+  .dashboard-layout .bills-header-actions,
+  .dashboard-layout .revenue-header-actions,
+  .dashboard-layout .analytics-header-actions,
+  .dashboard-layout .owner-reviews-header-actions,
+  .dashboard-layout .kitchen-header-actions {
+    width: 100%;
+  }
+
+  .dashboard-layout .page-header-actions > *,
+  .dashboard-layout .bills-header-actions > *,
+  .dashboard-layout .revenue-header-actions > *,
+  .dashboard-layout .kitchen-header-actions > * {
+    flex: 1 1 140px;
+  }
+
+  .dashboard-layout .item-count {
+    align-self: flex-start;
+  }
+
+  .dashboard-layout .restaurant-grid,
+  .dashboard-layout .branch-grid,
+  .dashboard-layout .table-grid,
+  .dashboard-layout .orders-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dashboard-layout .bills-summary-grid,
+  .dashboard-layout .dining-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .dashboard-layout .bills-summary-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 14px;
+  }
+
+  .dashboard-layout .bills-summary-card h2 {
+    font-size: 19px;
+  }
+
+  .dashboard-layout .bills-panel,
+  .dashboard-layout .dining-panel,
+  .dashboard-layout .sales-panel,
+  .dashboard-layout .revenue-panel,
+  .dashboard-layout .owner-reviews-section,
+  .dashboard-layout .analytics-section {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .dashboard-layout .bills-status-filter {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .dashboard-layout .bills-pagination,
+  .dashboard-layout .bills-pagination-controls {
+    justify-content: center;
+    text-align: center;
+  }
+
+  .dashboard-layout .sales-lower-grid,
+  .dashboard-layout .revenue-panels,
+  .dashboard-layout .analytics-engagement-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dashboard-layout .sales-filters,
+  .dashboard-layout .revenue-filters {
+    align-items: stretch;
+  }
+
+  .dashboard-layout .sales-filters > *,
+  .dashboard-layout .revenue-filters > * {
+    flex: 1 1 100%;
+  }
+
+  .dashboard-layout .kitchen-stats,
+  .dashboard-layout .kitchen-stats-enhanced {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-layout .orders-toolbar,
+  .dashboard-layout .kitchen-toolbar,
+  .dashboard-layout .kitchen-toolbar-enhanced {
+    padding: 14px;
+  }
+
+  .dashboard-layout .sales-status-row {
+    grid-template-columns: 90px minmax(0, 1fr) auto;
+  }
+
+  .dashboard-layout .menu-upload-card {
+    padding: 20px;
+  }
+
+  .form-modal-overlay {
+    padding: 12px;
+    align-items: flex-end;
+  }
+
+  .form-modal,
+  .dish-form-modal {
+    width: 100%;
+    max-width: 100%;
+    border-radius: 22px;
+  }
+}
+
+@media (max-width: 340px) {
+  .dashboard-layout .bills-summary-grid,
+  .dashboard-layout .dining-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-layout .bills-spin {
+    animation: none;
+  }
+
+  .dashboard-layout .restaurant-card,
+  .dashboard-layout .branch-card,
+  .dashboard-layout .table-card {
+    transition: none;
+  }
+}

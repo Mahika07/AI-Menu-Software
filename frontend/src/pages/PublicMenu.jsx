@@ -1,0 +1,1215 @@
+import { useEffect, useMemo, useState } from "react";
+import { useParams } from "react-router-dom";
+import {
+  Search,
+  SlidersHorizontal,
+  X,
+  Utensils,
+  Leaf,
+  Flame,
+  ShoppingBag,
+  Plus,
+  Minus,
+  Trash2,
+  ClipboardCheck,
+  Clock,
+  RefreshCw,
+} from "lucide-react";
+
+import { getPublicMenu } from "../api/menu";
+import {
+  createDineInOrder,
+  getOrderStatus,
+  getTableOrders,
+  getOrCreateDiningSession,
+  startNewDiningSession,
+} from "../api/orders";
+import DishDetails from "../components/DishDetails";
+import AIAssistant from "../components/AIAssistant";
+import { useAnalytics } from "../hooks/useAnalytics";
+
+const formatMoney = (value) =>
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  }).format(Number(value || 0));
+
+const ORDER_STATUS_LABELS = {
+  pending: "Order received",
+  confirmed: "Order confirmed",
+  preparing: "Being prepared",
+  ready: "Ready to serve",
+  completed: "Completed",
+  cancelled: "Cancelled",
+};
+
+function PublicMenu() {
+  const { qrToken } = useParams();
+
+  const [menu, setMenu] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const [search, setSearch] = useState("");
+  const [dietaryFilter, setDietaryFilter] = useState("");
+  const [spiceFilter, setSpiceFilter] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+  const [selectedDish, setSelectedDish] = useState(null);
+
+  const [analyticsBranchId, setAnalyticsBranchId] = useState(null);
+  const [analyticsTableId, setAnalyticsTableId] = useState(null);
+
+  const [cart, setCart] = useState([]);
+  const [cartOpen, setCartOpen] = useState(false);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+
+  const [customerName, setCustomerName] = useState("");
+  const [customerNote, setCustomerNote] = useState("");
+  const [checkoutError, setCheckoutError] = useState("");
+  const [submittingOrder, setSubmittingOrder] = useState(false);
+
+  const [activeOrder, setActiveOrder] = useState(null);
+  const [tableOrders, setTableOrders] = useState([]);
+  const [tableOrdersError, setTableOrdersError] = useState("");
+  const [trackingError, setTrackingError] = useState("");
+
+  const { track } = useAnalytics(analyticsBranchId, analyticsTableId, qrToken);
+
+  const [diningSessionReady, setDiningSessionReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadMenu() {
+      try {
+        setLoading(true);
+        setError("");
+
+        const data = await getPublicMenu(qrToken);
+
+        if (cancelled) return;
+
+        setMenu(data);
+        setAnalyticsBranchId(data?.branch_id ?? null);
+        setAnalyticsTableId(data?.table_id ?? null);
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err.response?.data?.detail || "This menu is currently unavailable.",
+          );
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    if (qrToken) loadMenu();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [qrToken]);
+  // Create or restore the current table's dining session.
+  useEffect(() => {
+    if (!qrToken) {
+      setDiningSessionReady(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function initializeDiningSession() {
+      setDiningSessionReady(false);
+      setTableOrdersError("");
+
+      try {
+        await getOrCreateDiningSession(qrToken);
+
+        if (!cancelled) {
+          setDiningSessionReady(true);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setDiningSessionReady(false);
+          setTableOrdersError(
+            err.response?.data?.detail ||
+              err.message ||
+              "Unable to start your dining session. Please try again.",
+          );
+        }
+      }
+    }
+
+    initializeDiningSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [qrToken]);
+
+  // Refresh the public order status while the order is in progress.
+  useEffect(() => {
+    if (!activeOrder?.order_number) return;
+
+    const terminalStatuses = ["completed", "cancelled"];
+
+    if (terminalStatuses.includes(activeOrder.status)) return;
+
+    let cancelled = false;
+
+    const refreshStatus = async () => {
+      try {
+        const latest = await getOrderStatus(activeOrder.order_number);
+
+        if (!cancelled) {
+          setActiveOrder(latest);
+          setTrackingError("");
+        }
+      } catch {
+        if (!cancelled) {
+          setTrackingError(
+            "We couldn't refresh your order status. Please try again.",
+          );
+        }
+      }
+    };
+
+    const intervalId = window.setInterval(refreshStatus, 10000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeOrder?.order_number, activeOrder?.status]);
+
+  // Refresh orders only while the current dining session is ready.
+  useEffect(() => {
+    if (!qrToken || !diningSessionReady) return undefined;
+
+    let cancelled = false;
+
+    const refreshTableOrders = async () => {
+      try {
+        const data = await getTableOrders(qrToken);
+
+        if (!cancelled) {
+          setTableOrders(Array.isArray(data) ? data : []);
+          setTableOrdersError("");
+        }
+      } catch (err) {
+        if (cancelled) return;
+
+        setTableOrdersError(
+          err.response?.data?.detail ||
+            err.message ||
+            "Unable to load orders for this dining session.",
+        );
+        setDiningSessionReady(false);
+      }
+    };
+
+    refreshTableOrders();
+    const intervalId = window.setInterval(refreshTableOrders, 10000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [qrToken, diningSessionReady]);
+
+  function handleDishClick(dish) {
+    setSelectedDish(dish);
+
+    track({
+      eventType: "DISH_VIEW",
+      dishId: dish?.id ?? null,
+      metadata: {
+        source: "public_menu",
+        dish_name: dish?.name ?? null,
+      },
+    });
+  }
+
+  function addToCart(dish) {
+    if (!dish.is_available) return;
+
+    setCart((current) => {
+      const existing = current.find((item) => item.dish.id === dish.id);
+
+      if (existing) {
+        return current.map((item) =>
+          item.dish.id === dish.id
+            ? { ...item, quantity: Math.min(item.quantity + 1, 20) }
+            : item,
+        );
+      }
+
+      return [
+        ...current,
+        {
+          dish,
+          quantity: 1,
+          special_instructions: "",
+        },
+      ];
+    });
+
+    setCheckoutError("");
+    setCartOpen(true);
+
+    track({
+      eventType: "ADD_TO_CART",
+      dishId: dish.id,
+      metadata: {
+        source: "public_menu",
+        dish_name: dish.name,
+      },
+    });
+  }
+
+  function updateQuantity(dishId, change) {
+    setCart((current) =>
+      current
+        .map((item) =>
+          item.dish.id === dishId
+            ? {
+                ...item,
+                quantity: Math.min(20, item.quantity + change),
+              }
+            : item,
+        )
+        .filter((item) => item.quantity > 0),
+    );
+  }
+
+  function updateInstructions(dishId, value) {
+    setCart((current) =>
+      current.map((item) =>
+        item.dish.id === dishId
+          ? {
+              ...item,
+              special_instructions: value.slice(0, 500),
+            }
+          : item,
+      ),
+    );
+  }
+
+  function removeFromCart(dishId) {
+    setCart((current) => current.filter((item) => item.dish.id !== dishId));
+  }
+
+  const cartCount = cart.reduce((total, item) => total + item.quantity, 0);
+
+  const cartSubtotal = cart.reduce(
+    (total, item) => total + Number(item.dish.price) * item.quantity,
+    0,
+  );
+
+  const filteredCategories = useMemo(() => {
+    if (!menu?.categories) return [];
+
+    const searchTerm = search.trim().toLowerCase();
+
+    return menu.categories
+      .map((category) => ({
+        ...category,
+        dishes: category.dishes.filter((dish) => {
+          const matchesSearch =
+            !searchTerm ||
+            dish.name.toLowerCase().includes(searchTerm) ||
+            dish.description?.toLowerCase().includes(searchTerm) ||
+            dish.ingredients?.toLowerCase().includes(searchTerm);
+
+          const matchesDietary =
+            !dietaryFilter || dish.dietary_type === dietaryFilter;
+
+          const matchesSpice = !spiceFilter || dish.spice_level === spiceFilter;
+
+          return matchesSearch && matchesDietary && matchesSpice;
+        }),
+      }))
+      .filter((category) => category.dishes.length > 0);
+  }, [menu, search, dietaryFilter, spiceFilter]);
+
+  const totalDishes =
+    menu?.categories?.reduce(
+      (total, category) => total + category.dishes.length,
+      0,
+    ) || 0;
+
+  const filteredDishCount = filteredCategories.reduce(
+    (total, category) => total + category.dishes.length,
+    0,
+  );
+
+  const hasFilters = Boolean(search || dietaryFilter || spiceFilter);
+
+  function clearFilters() {
+    setSearch("");
+    setDietaryFilter("");
+    setSpiceFilter("");
+  }
+
+  useEffect(() => {
+    const searchTerm = search.trim();
+
+    if (!analyticsBranchId || !searchTerm) return;
+
+    const timeout = window.setTimeout(() => {
+      track({
+        eventType: "SEARCH",
+        metadata: {
+          query: searchTerm,
+          result_count: filteredDishCount,
+        },
+      });
+    }, 500);
+
+    return () => window.clearTimeout(timeout);
+  }, [search, analyticsBranchId, filteredDishCount, track]);
+
+  async function submitOrder(event) {
+    event.preventDefault();
+
+    if (!qrToken || cart.length === 0 || submittingOrder) return;
+
+    if (!diningSessionReady) {
+      setCheckoutError(
+        tableOrdersError ||
+          "Your dining session is not ready. Start a new dining session before placing an order.",
+      );
+      return;
+    }
+
+    setSubmittingOrder(true);
+    setCheckoutError("");
+
+    try {
+      const payload = {
+        customer_name: customerName.trim() || null,
+        customer_note: customerNote.trim() || null,
+        items: cart.map((item) => ({
+          dish_id: item.dish.id,
+          quantity: item.quantity,
+          special_instructions: item.special_instructions.trim() || null,
+        })),
+      };
+
+      const order = await createDineInOrder(qrToken, payload);
+
+      setActiveOrder(order);
+      setTableOrders((current) => [
+        order,
+        ...current.filter((entry) => entry.order_number !== order.order_number),
+      ]);
+      setCart([]);
+      setCheckoutOpen(false);
+      setCartOpen(false);
+      setCustomerName("");
+      setCustomerNote("");
+      setTrackingError("");
+
+      track({
+        eventType: "ORDER_PLACED",
+        metadata: {
+          source: "public_menu",
+          order_number: order.order_number,
+          item_count: order.items?.length ?? payload.items.length,
+          total_amount: order.total_amount,
+        },
+      });
+    } catch (err) {
+      setCheckoutError(
+        err.response?.data?.detail ||
+          "We couldn't place your order. Please check your connection and try again.",
+      );
+    } finally {
+      setSubmittingOrder(false);
+    }
+  }
+
+  async function refreshOrderStatus() {
+    if (!activeOrder?.order_number) return;
+
+    setTrackingError("");
+
+    try {
+      const latest = await getOrderStatus(activeOrder.order_number);
+      setActiveOrder(latest);
+    } catch (err) {
+      setTrackingError(
+        err.response?.data?.detail || "Unable to refresh your order status.",
+      );
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="public-menu-page">
+        <div className="public-menu-loading">
+          <div className="loading-spinner" />
+          <p>Loading menu...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !menu) {
+    return (
+      <div className="public-menu-page">
+        <div className="public-menu-error">
+          <div className="error-icon">
+            <Utensils size={32} />
+          </div>
+          <h2>Menu unavailable</h2>
+          <p>{error || "This menu is currently unavailable."}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="public-menu-page">
+      <header className="public-menu-header">
+        <div className="public-menu-header-content">
+          <div className="restaurant-brand">
+            {menu.logo_url ? (
+              <img
+                src={menu.logo_url}
+                alt={menu.restaurant_name || "Restaurant"}
+                className="restaurant-logo"
+              />
+            ) : (
+              <div className="restaurant-logo-placeholder">
+                <Utensils size={24} />
+              </div>
+            )}
+
+            <div>
+              <h1>{menu.restaurant_name || "Restaurant Menu"}</h1>
+              {menu.branch_name && <p>{menu.branch_name}</p>}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="order-header-button"
+            onClick={() => setCartOpen(true)}
+          >
+            <ShoppingBag size={19} />
+            <span>My order</span>
+            <span className="order-count">
+              {activeOrder ? (activeOrder.items?.length ?? 0) : cartCount}
+            </span>
+          </button>
+        </div>
+      </header>
+
+      {activeOrder && (
+        <section className="order-status-banner" aria-live="polite">
+          <div className="order-status-icon">
+            <ClipboardCheck size={24} />
+          </div>
+
+          <div className="order-status-copy">
+            <strong>
+              {ORDER_STATUS_LABELS[activeOrder.status] || activeOrder.status}
+            </strong>
+            <span>
+              Order #{activeOrder.order_number.slice(0, 8)} · Table{" "}
+              {activeOrder.table_number}
+            </span>
+            <span>Total: {formatMoney(activeOrder.total_amount)}</span>
+          </div>
+
+          <button
+            type="button"
+            className="order-status-refresh"
+            onClick={refreshOrderStatus}
+            aria-label="Refresh order status"
+          >
+            <RefreshCw size={18} />
+          </button>
+        </section>
+      )}
+
+      {trackingError && <p className="order-inline-error">{trackingError}</p>}
+
+      {tableOrders.length > 0 && (
+        <section className="table-orders-panel" aria-live="polite">
+          <header className="table-orders-panel-header">
+            <div>
+              <span>SHARED TABLE VIEW</span>
+              <h2>Active orders at your table</h2>
+              <p>
+                See which dishes are still being prepared and which are ready.
+              </p>
+            </div>
+            <span className="table-orders-count">
+              {tableOrders.length}{" "}
+              {tableOrders.length === 1 ? "order" : "orders"}
+            </span>
+          </header>
+          <div className="table-orders-list">
+            {tableOrders.map((tableOrder) => (
+              <article
+                className="table-order-card"
+                key={tableOrder.order_number}
+              >
+                <header>
+                  <div>
+                    <strong>
+                      Order #{String(tableOrder.order_number).slice(0, 8)}
+                    </strong>
+                    <small>
+                      {tableOrder.created_at
+                        ? new Date(tableOrder.created_at).toLocaleTimeString(
+                            "en-IN",
+                            { hour: "2-digit", minute: "2-digit" },
+                          )
+                        : "Time unavailable"}
+                    </small>
+                  </div>
+                  <span
+                    className={`table-order-status status-${tableOrder.status}`}
+                  >
+                    {ORDER_STATUS_LABELS[tableOrder.status] ||
+                      tableOrder.status}
+                  </span>
+                </header>
+                <div className="table-order-items">
+                  {(tableOrder.items || []).map((item) => (
+                    <div className="table-order-item" key={item.id}>
+                      <span>
+                        {item.quantity} × {item.dish_name}
+                      </span>
+                      <small
+                        className={`item-status-text item-status-${item.status || "pending"}`}
+                      >
+                        {
+                          {
+                            pending: "Pending",
+                            preparing: "Preparing",
+                            ready: "Ready",
+                            served: "Served",
+                            cancelled: "Cancelled",
+                          }[item.status || "pending"]
+                        }
+                      </small>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {tableOrdersError && (
+        <section className="table-orders-error" role="alert">
+          <p>{tableOrdersError}</p>
+          <button
+            type="button"
+            className="order-secondary-button"
+            disabled={!qrToken}
+            onClick={async () => {
+              try {
+                setTableOrdersError("");
+                setDiningSessionReady(false);
+
+                await startNewDiningSession(qrToken);
+
+                setTableOrders([]);
+                setDiningSessionReady(true);
+              } catch (err) {
+                setDiningSessionReady(false);
+                setTableOrdersError(
+                  err.response?.data?.detail ||
+                    err.message ||
+                    "Unable to start a new dining session. Please try again.",
+                );
+              }
+            }}
+          >
+            Start new dining session
+          </button>
+        </section>
+      )}
+
+      <section className="public-menu-controls">
+        <div className="public-menu-search">
+          <Search size={20} />
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search dishes or ingredients..."
+          />
+
+          {search && (
+            <button
+              type="button"
+              className="search-clear-button"
+              onClick={() => setSearch("")}
+              aria-label="Clear search"
+            >
+              <X size={18} />
+            </button>
+          )}
+        </div>
+
+        <button
+          type="button"
+          className={`filter-button ${showFilters ? "active" : ""}`}
+          onClick={() => setShowFilters((current) => !current)}
+        >
+          <SlidersHorizontal size={18} />
+          Filters
+        </button>
+      </section>
+
+      {showFilters && (
+        <section className="public-menu-filters">
+          <div className="filter-group">
+            <label htmlFor="dietary-filter">Dietary</label>
+            <select
+              id="dietary-filter"
+              value={dietaryFilter}
+              onChange={(event) => setDietaryFilter(event.target.value)}
+            >
+              <option value="">All</option>
+              <option value="Vegetarian">Vegetarian</option>
+              <option value="Vegan">Vegan</option>
+              <option value="Non-Vegetarian">Non-Vegetarian</option>
+              <option value="Egg">Egg</option>
+            </select>
+          </div>
+
+          <div className="filter-group">
+            <label htmlFor="spice-filter">Spice level</label>
+            <select
+              id="spice-filter"
+              value={spiceFilter}
+              onChange={(event) => setSpiceFilter(event.target.value)}
+            >
+              <option value="">All</option>
+              <option value="Mild">Mild</option>
+              <option value="Medium">Medium</option>
+              <option value="Spicy">Spicy</option>
+              <option value="Very Spicy">Very Spicy</option>
+            </select>
+          </div>
+
+          {hasFilters && (
+            <button
+              type="button"
+              className="clear-filters-button"
+              onClick={clearFilters}
+            >
+              Clear filters
+            </button>
+          )}
+        </section>
+      )}
+
+      <div className="public-menu-summary">
+        <span>
+          {filteredDishCount} {filteredDishCount === 1 ? "dish" : "dishes"}
+        </span>
+        {hasFilters ? (
+          <span className="filter-result-text">Showing filtered results</span>
+        ) : (
+          <span>{totalDishes} total</span>
+        )}
+      </div>
+
+      <main className="public-menu-content">
+        {filteredCategories.length === 0 ? (
+          <div className="empty-menu-state">
+            <Utensils size={36} />
+            <h2>No dishes found</h2>
+            <p>Try changing your search or filters.</p>
+            {hasFilters && (
+              <button type="button" onClick={clearFilters}>
+                Clear filters
+              </button>
+            )}
+          </div>
+        ) : (
+          filteredCategories.map((category) => (
+            <section className="menu-category" key={category.id}>
+              <div className="menu-category-header">
+                <div>
+                  <h2>{category.name}</h2>
+                  {category.description && <p>{category.description}</p>}
+                </div>
+                <span>{category.dishes.length}</span>
+              </div>
+
+              <div className="dish-grid">
+                {category.dishes.map((dish) => (
+                  <article
+                    key={dish.id}
+                    className="dish-card"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => handleDishClick(dish)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        handleDishClick(dish);
+                      }
+                    }}
+                  >
+                    <div className="dish-image-wrapper">
+                      {dish.image_url ? (
+                        <img
+                          src={dish.image_url}
+                          alt={dish.name}
+                          className="dish-image"
+                        />
+                      ) : (
+                        <div className="dish-image-placeholder">
+                          <Utensils size={28} />
+                        </div>
+                      )}
+
+                      {!dish.is_available && (
+                        <div className="dish-unavailable">
+                          Currently unavailable
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="dish-card-content">
+                      <div className="dish-title-row">
+                        <h3>{dish.name}</h3>
+                        <span className="dish-price">
+                          {formatMoney(dish.price)}
+                        </span>
+                      </div>
+
+                      {dish.description && (
+                        <p className="dish-description">{dish.description}</p>
+                      )}
+
+                      <div className="dish-tags">
+                        {dish.dietary_type === "Vegetarian" && (
+                          <span className="dish-tag vegetarian">
+                            <Leaf size={14} />
+                            Vegetarian
+                          </span>
+                        )}
+
+                        {dish.dietary_type === "Vegan" && (
+                          <span className="dish-tag vegan">
+                            <Leaf size={14} />
+                            Vegan
+                          </span>
+                        )}
+
+                        {dish.spice_level && (
+                          <span className="dish-tag spice">
+                            <Flame size={14} />
+                            {dish.spice_level}
+                          </span>
+                        )}
+
+                        {dish.serving_size && (
+                          <span className="dish-tag serving">
+                            {dish.serving_size}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="dish-card-actions">
+                        <span className="dish-view-more">View details</span>
+
+                        <button
+                          type="button"
+                          className="dish-add-button"
+                          disabled={!dish.is_available}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            addToCart(dish);
+                          }}
+                        >
+                          <Plus size={16} />
+                          Add
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ))
+        )}
+      </main>
+
+      {selectedDish && (
+        <DishDetails
+          dish={selectedDish}
+          onClose={() => setSelectedDish(null)}
+          branchId={analyticsBranchId}
+          tableId={analyticsTableId}
+          qrToken={qrToken}
+        />
+      )}
+
+      <AIAssistant
+        qrToken={qrToken}
+        branchId={analyticsBranchId}
+        tableId={analyticsTableId}
+      />
+
+      <footer className="public-menu-footer">
+        <p>Powered by Smart Menu</p>
+      </footer>
+
+      {cartOpen && (
+        <div
+          className="order-overlay"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setCartOpen(false);
+            }
+          }}
+        >
+          <section
+            className="order-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cart-title"
+          >
+            <div className="order-panel-header">
+              <div>
+                <h2 id="cart-title">Your order</h2>
+                <p>
+                  {cartCount} {cartCount === 1 ? "item" : "items"}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="order-close-button"
+                onClick={() => setCartOpen(false)}
+                aria-label="Close cart"
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            {activeOrder ? (
+              <div className="my-order-details">
+                <div className="my-order-summary">
+                  <span>Order number</span>
+                  <strong>#{activeOrder.order_number}</strong>
+
+                  <span>Table</span>
+                  <strong>{activeOrder.table_number || "—"}</strong>
+
+                  <span>Order status</span>
+                  <strong>
+                    {ORDER_STATUS_LABELS[activeOrder.status] ||
+                      activeOrder.status}
+                  </strong>
+
+                  <span>Total</span>
+                  <strong>{formatMoney(activeOrder.total_amount)}</strong>
+                </div>
+
+                <h3>Your dishes</h3>
+
+                {(activeOrder.items || []).map((item) => (
+                  <article className="my-order-item" key={item.id}>
+                    <div>
+                      <strong>{item.dish_name}</strong>
+                      <p>
+                        {item.quantity} × {formatMoney(item.unit_price)}
+                      </p>
+
+                      {item.special_instructions && (
+                        <p>{item.special_instructions}</p>
+                      )}
+                    </div>
+
+                    <div className="my-order-item-right">
+                      <strong>{formatMoney(item.line_total)}</strong>
+                      <span
+                        className={`my-item-status status-${item.status || "pending"}`}
+                      >
+                        {(item.status || "pending").replaceAll("_", " ")}
+                      </span>
+                    </div>
+                  </article>
+                ))}
+
+                {trackingError && (
+                  <p className="order-inline-error">{trackingError}</p>
+                )}
+
+                <button
+                  type="button"
+                  className="order-primary-button"
+                  onClick={refreshOrderStatus}
+                >
+                  <RefreshCw size={16} />
+                  Refresh order status
+                </button>
+              </div>
+            ) : cart.length === 0 ? (
+              <div className="order-empty-state">
+                <ShoppingBag size={38} />
+                <h3>No order placed yet</h3>
+                <p>
+                  Add dishes from the menu and place your order to track it
+                  here.
+                </p>
+                <button type="button" onClick={() => setCartOpen(false)}>
+                  Browse menu
+                </button>
+              </div>
+            ) : (
+              // Keep your existing cart-items and checkout JSX here.
+              <div className="order-cart-items">
+                {cart.map((item) => (
+                  <article className="order-cart-item" key={item.dish.id}>
+                    <div className="order-cart-item-top">
+                      <div className="order-cart-item-info">
+                        <strong>{item.dish.name}</strong>
+                        <span>{formatMoney(item.dish.price)} each</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="order-remove-button"
+                        onClick={() => removeFromCart(item.dish.id)}
+                        aria-label={`Remove ${item.dish.name}`}
+                      >
+                        <Trash2 size={17} />
+                      </button>
+                    </div>
+
+                    <div className="order-cart-item-bottom">
+                      <div className="order-quantity-control">
+                        <button
+                          type="button"
+                          onClick={() => updateQuantity(item.dish.id, -1)}
+                          aria-label={`Decrease ${item.dish.name} quantity`}
+                        >
+                          <Minus size={15} />
+                        </button>
+
+                        <span>{item.quantity}</span>
+
+                        <button
+                          type="button"
+                          disabled={item.quantity >= 20}
+                          onClick={() => updateQuantity(item.dish.id, 1)}
+                          aria-label={`Increase ${item.dish.name} quantity`}
+                        >
+                          <Plus size={15} />
+                        </button>
+                      </div>
+
+                      <strong>
+                        {formatMoney(Number(item.dish.price) * item.quantity)}
+                      </strong>
+                    </div>
+
+                    <label className="order-instructions-label">
+                      Special instructions
+                      <textarea
+                        rows={2}
+                        maxLength={500}
+                        placeholder="e.g. Less spicy, no onions"
+                        value={item.special_instructions}
+                        onChange={(event) =>
+                          updateInstructions(item.dish.id, event.target.value)
+                        }
+                      />
+                    </label>
+                  </article>
+                ))}
+
+                <div className="order-cart-summary">
+                  <div>
+                    <span>Subtotal</span>
+                    <strong>{formatMoney(cartSubtotal)}</strong>
+                  </div>
+                  <p>Taxes or additional charges are not included.</p>
+
+                  <button
+                    type="button"
+                    className="order-primary-button"
+                    onClick={() => {
+                      setCheckoutError("");
+                      setCartOpen(false);
+                      setCheckoutOpen(true);
+                    }}
+                  >
+                    Continue to checkout
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+
+      {checkoutOpen && (
+        <div className="order-overlay">
+          <section
+            className="order-panel checkout-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="checkout-title"
+          >
+            <div className="order-panel-header">
+              <div>
+                <h2 id="checkout-title">Checkout</h2>
+                <p>Dining at {menu.branch_name || "this branch"}</p>
+              </div>
+
+              <button
+                type="button"
+                className="order-close-button"
+                onClick={() => {
+                  if (!submittingOrder) {
+                    setCheckoutOpen(false);
+                    setCartOpen(true);
+                  }
+                }}
+                disabled={submittingOrder}
+                aria-label="Back to cart"
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            <form className="order-checkout-form" onSubmit={submitOrder}>
+              <label>
+                Your name <span>(optional)</span>
+                <input
+                  type="text"
+                  maxLength={100}
+                  value={customerName}
+                  onChange={(event) => setCustomerName(event.target.value)}
+                  placeholder="Enter your name"
+                  autoComplete="name"
+                />
+              </label>
+
+              <label>
+                Note for the restaurant <span>(optional)</span>
+                <textarea
+                  rows={3}
+                  maxLength={1000}
+                  value={customerNote}
+                  onChange={(event) => setCustomerNote(event.target.value)}
+                  placeholder="Any additional requests?"
+                />
+              </label>
+
+              <div className="order-checkout-summary">
+                <span>{cartCount} items</span>
+                <strong>{formatMoney(cartSubtotal)}</strong>
+              </div>
+
+              <p className="order-payment-note">
+                Dine-in order · Pay at the counter or as instructed by staff.
+              </p>
+
+              {checkoutError && (
+                <div className="order-form-error" role="alert">
+                  {typeof checkoutError === "string"
+                    ? checkoutError
+                    : "One or more items are unavailable. Refresh the menu and try again."}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="order-primary-button"
+                disabled={submittingOrder || cart.length === 0}
+              >
+                {submittingOrder ? (
+                  <>
+                    <Clock size={17} />
+                    Placing order...
+                  </>
+                ) : (
+                  <>
+                    <ClipboardCheck size={18} />
+                    Place order · {formatMoney(cartSubtotal)}
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                className="order-secondary-button"
+                disabled={submittingOrder}
+                onClick={() => {
+                  setCheckoutOpen(false);
+                  setCartOpen(true);
+                }}
+              >
+                Back to cart
+              </button>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {activeOrder && (
+        <section
+          className="order-confirmation"
+          aria-live="polite"
+          aria-label="Order confirmation"
+        >
+          <button
+            type="button"
+            className="order-confirmation-close"
+            onClick={() => setActiveOrder(null)}
+            aria-label="Dismiss order status"
+          >
+            <X size={17} />
+          </button>
+
+          <div className="order-confirmation-icon">
+            <ClipboardCheck size={26} />
+          </div>
+
+          <h2>Your order</h2>
+          <p className="order-confirmation-number">
+            #{activeOrder.order_number}
+          </p>
+
+          <div className="order-confirmation-status">
+            {ORDER_STATUS_LABELS[activeOrder.status] || activeOrder.status}
+          </div>
+
+          <div className="order-confirmation-total">
+            <span>Total</span>
+            <strong>{formatMoney(activeOrder.total_amount)}</strong>
+          </div>
+
+          <button
+            type="button"
+            className="order-secondary-button"
+            onClick={refreshOrderStatus}
+          >
+            <RefreshCw size={16} />
+            Refresh status
+          </button>
+        </section>
+      )}
+    </div>
+  );
+}
+
+export default PublicMenu;
