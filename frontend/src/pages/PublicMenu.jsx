@@ -556,7 +556,7 @@ function PublicMenu() {
             <ShoppingBag size={19} />
             <span className="order-header-label">My order</span>
             <span className="order-count">
-              {activeOrder ? (activeOrder.items?.length ?? 0) : cartCount}
+              {tableOrders.length > 0 ? tableOrders.length : cartCount}
             </span>
           </button>
         </div>
@@ -564,75 +564,6 @@ function PublicMenu() {
 
       {trackingError && <p className="order-inline-error">{trackingError}</p>}
 
-      {tableOrders.length > 0 && (
-        <section className="table-orders-panel" aria-live="polite">
-          <header className="table-orders-panel-header">
-            <div>
-              <span>SHARED TABLE VIEW</span>
-              <h2>Active orders at your table</h2>
-              <p>
-                See which dishes are still being prepared and which are ready.
-              </p>
-            </div>
-            <span className="table-orders-count">
-              {tableOrders.length}{" "}
-              {tableOrders.length === 1 ? "order" : "orders"}
-            </span>
-          </header>
-          <div className="table-orders-list">
-            {tableOrders.map((tableOrder) => (
-              <article
-                className="table-order-card"
-                key={tableOrder.order_number}
-              >
-                <header>
-                  <div>
-                    <strong>
-                      Order #{String(tableOrder.order_number).slice(0, 8)}
-                    </strong>
-                    <small>
-                      {tableOrder.created_at
-                        ? new Date(tableOrder.created_at).toLocaleTimeString(
-                            "en-IN",
-                            { hour: "2-digit", minute: "2-digit" },
-                          )
-                        : "Time unavailable"}
-                    </small>
-                  </div>
-                  <span
-                    className={`table-order-status status-${tableOrder.status}`}
-                  >
-                    {ORDER_STATUS_LABELS[tableOrder.status] ||
-                      tableOrder.status}
-                  </span>
-                </header>
-                <div className="table-order-items">
-                  {(tableOrder.items || []).map((item) => (
-                    <div className="table-order-item" key={item.id}>
-                      <span>
-                        {item.quantity} × {item.dish_name}
-                      </span>
-                      <small
-                        className={`item-status-text item-status-${item.status || "pending"}`}
-                      >
-                        {
-                          {
-                            pending: "Pending",
-                            preparing: "Preparing",
-                            ready: "Ready",
-                            served: "Served",
-                            cancelled: "Cancelled",
-                          }[item.status || "pending"]
-                        }
-                      </small>
-                    </div>
-                  ))}
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-      )}
 
       {tableOrdersError && (
         <section className="table-orders-error" role="alert">
@@ -996,7 +927,9 @@ function PublicMenu() {
               <div>
                 <h2 id="cart-title">Your order</h2>
                 <p>
-                  {cartCount} {cartCount === 1 ? "item" : "items"}
+                  {tableOrders.length > 0
+                    ? `${tableOrders.length} ${tableOrders.length === 1 ? "order" : "orders"}`
+                    : `${cartCount} ${cartCount === 1 ? "item" : "items"}`}
                 </p>
               </div>
 
@@ -1010,63 +943,72 @@ function PublicMenu() {
               </button>
             </div>
 
-            {activeOrder ? (
+            {tableOrders.length > 0 ? (
               <div className="my-order-details">
-                <div className="my-order-summary">
-                  <span>Order number</span>
-                  <strong>#{activeOrder.order_number}</strong>
+                {tableOrders.map((order) => (
+                  <article className="my-table-order" key={order.order_number}>
+                    <div className="my-order-summary">
+                      <span>Order number</span>
+                      <strong>#{order.order_number}</strong>
 
-                  <span>Table</span>
-                  <strong>{activeOrder.table_number || "—"}</strong>
+                      <span>Table</span>
+                      <strong>{order.table_number || menu.table_number || "—"}</strong>
 
-                  <span>Order status</span>
-                  <strong>
-                    {ORDER_STATUS_LABELS[activeOrder.status] ||
-                      activeOrder.status}
-                  </strong>
+                      <span>Order status</span>
+                      <strong>
+                        {ORDER_STATUS_LABELS[order.status] || order.status}
+                      </strong>
 
-                  <span>Total</span>
-                  <strong>{formatMoney(activeOrder.total_amount)}</strong>
-                </div>
-
-                <h3>Your dishes</h3>
-
-                {(activeOrder.items || []).map((item) => (
-                  <article className="my-order-item" key={item.id}>
-                    <div>
-                      <strong>{item.dish_name}</strong>
-                      <p>
-                        {item.quantity} × {formatMoney(item.unit_price)}
-                      </p>
-
-                      {item.special_instructions && (
-                        <p>{item.special_instructions}</p>
-                      )}
+                      <span>Total</span>
+                      <strong>{formatMoney(order.total_amount)}</strong>
                     </div>
 
-                    <div className="my-order-item-right">
-                      <strong>{formatMoney(item.line_total)}</strong>
-                      <span
-                        className={`my-item-status status-${item.status || "pending"}`}
-                      >
-                        {(item.status || "pending").replaceAll("_", " ")}
-                      </span>
-                    </div>
+                    <h3>Items in this order</h3>
+                    {(order.items || []).map((item) => (
+                      <article className="my-order-item" key={item.id}>
+                        <div>
+                          <strong>{item.dish_name}</strong>
+                          <p>
+                            {item.quantity} × {formatMoney(item.unit_price)}
+                          </p>
+                          {item.special_instructions && <p>{item.special_instructions}</p>}
+                        </div>
+                        <div className="my-order-item-right">
+                          <strong>{formatMoney(item.line_total)}</strong>
+                          <span className={`my-item-status status-${item.status || "pending"}`}>
+                            {(item.status || "pending").replaceAll("_", " ")}
+                          </span>
+                        </div>
+                      </article>
+                    ))}
+
+                    <button
+                      type="button"
+                      className="order-secondary-button"
+                      onClick={async () => {
+                        try {
+                          const latest = await getOrderStatus(order.order_number);
+                          setTableOrders((current) => current.map((entry) =>
+                            entry.order_number === latest.order_number ? latest : entry
+                          ));
+                          if (activeOrder?.order_number === latest.order_number) {
+                            setActiveOrder(latest);
+                          }
+                          setTrackingError("");
+                        } catch (err) {
+                          setTrackingError(
+                            err.response?.data?.detail || "Unable to refresh order status."
+                          );
+                        }
+                      }}
+                    >
+                      <RefreshCw size={16} />
+                      Refresh this order
+                    </button>
                   </article>
                 ))}
 
-                {trackingError && (
-                  <p className="order-inline-error">{trackingError}</p>
-                )}
-
-                <button
-                  type="button"
-                  className="order-primary-button"
-                  onClick={refreshOrderStatus}
-                >
-                  <RefreshCw size={16} />
-                  Refresh order status
-                </button>
+                {trackingError && <p className="order-inline-error">{trackingError}</p>}
               </div>
             ) : cart.length === 0 ? (
               <div className="order-empty-state">
@@ -1273,49 +1215,6 @@ function PublicMenu() {
         </div>
       )}
 
-      {activeOrder && (
-        <section
-          className="order-confirmation"
-          aria-live="polite"
-          aria-label="Order confirmation"
-        >
-          <button
-            type="button"
-            className="order-confirmation-close"
-            onClick={() => setActiveOrder(null)}
-            aria-label="Dismiss order status"
-          >
-            <X size={17} />
-          </button>
-
-          <div className="order-confirmation-icon">
-            <ClipboardCheck size={26} />
-          </div>
-
-          <h2>Your order</h2>
-          <p className="order-confirmation-number">
-            #{activeOrder.order_number}
-          </p>
-
-          <div className="order-confirmation-status">
-            {ORDER_STATUS_LABELS[activeOrder.status] || activeOrder.status}
-          </div>
-
-          <div className="order-confirmation-total">
-            <span>Total</span>
-            <strong>{formatMoney(activeOrder.total_amount)}</strong>
-          </div>
-
-          <button
-            type="button"
-            className="order-secondary-button"
-            onClick={refreshOrderStatus}
-          >
-            <RefreshCw size={16} />
-            Refresh status
-          </button>
-        </section>
-      )}
     </div>
   );
 }
