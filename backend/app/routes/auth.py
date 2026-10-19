@@ -4,6 +4,9 @@ import secrets
 import urllib.error
 import urllib.request
 import json
+import logging
+import re
+from email.utils import parseaddr
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -28,11 +31,47 @@ router = APIRouter(
     prefix="/auth",
     tags=["Authentication"],
 )
+logger = logging.getLogger(__name__)
+
+
+def _safe_provider_message(value: object) -> str:
+    """Keep provider diagnostics useful without copying addresses, URLs, or tokens."""
+    message = str(value or "")
+    message = re.sub(r"https?://\S+", "[url]", message, flags=re.IGNORECASE)
+    message = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[email]", message)
+    message = re.sub(r"(?i)(token|key|secret|password)\s*[:=]\s*\S+", r"\1=[redacted]", message)
+    message = " ".join(message.split())
+    return message[:300]
+
+
+def _provider_error_details(body: bytes) -> tuple[str | None, str | None]:
+    try:
+        parsed = json.loads(body.decode("utf-8", errors="replace"))
+    except (ValueError, UnicodeError):
+        return None, _safe_provider_message(body.decode("utf-8", errors="replace"))
+    if not isinstance(parsed, dict):
+        return None, _safe_provider_message(parsed)
+    code = parsed.get("name") or parsed.get("code")
+    message = parsed.get("message") or parsed.get("error")
+    safe_code = re.sub(r"[^A-Za-z0-9_.-]", "", str(code))[:80] if code else None
+    return safe_code, _safe_provider_message(message) if message else None
 
 
 def _send_password_reset_email(email: str, token: str) -> None:
-    if not settings.RESEND_API_KEY:
+    missing = [name for name, value in (
+        ("RESEND_API_KEY", settings.RESEND_API_KEY),
+        ("FRONTEND_URL", settings.FRONTEND_URL),
+        ("EMAIL_FROM", settings.EMAIL_FROM),
+    ) if not value or not str(value).strip()]
+    if missing:
+        logger.error("Password reset email configuration missing variables=%s", ",".join(missing))
         raise RuntimeError("Password reset email is not configured")
+    sender_address = parseaddr(settings.EMAIL_FROM)[1]
+    if not sender_address or "@" not in sender_address:
+        logger.error("Password reset email sender configuration is invalid variable=EMAIL_FROM")
+        raise RuntimeError("Password reset email sender is invalid")
+    if sender_address.lower() == "onboarding@resend.dev":
+        logger.warning("Password reset email uses Resend test sender; check EMAIL_FROM for a verified production sender")
     reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?token={token}"
     payload = json.dumps({
         "from": settings.EMAIL_FROM,
@@ -48,8 +87,16 @@ def _send_password_reset_email(email: str, token: str) -> None:
     try:
         with urllib.request.urlopen(req, timeout=10) as response:
             if response.status >= 300:
+                code, message = _provider_error_details(response.read())
+                logger.error("Password reset email provider rejected request provider=resend http_status=%s error_code=%s error_message=%s", response.status, code or "unknown", message or "unavailable")
                 raise RuntimeError("Email provider rejected the message")
-    except (urllib.error.URLError, TimeoutError) as exc:
+            logger.info("Password reset email accepted by provider=resend http_status=%s", response.status)
+    except urllib.error.HTTPError as exc:
+        code, message = _provider_error_details(exc.read())
+        logger.error("Password reset email provider rejected request provider=resend http_status=%s error_code=%s error_message=%s", exc.code, code or "unknown", message or "unavailable")
+        raise RuntimeError("Email provider rejected the message") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        logger.error("Password reset email provider request failed provider=resend error_type=%s error_message=%s", type(exc).__name__, _safe_provider_message(exc))
         raise RuntimeError("Could not send password reset email") from exc
 
 
@@ -75,8 +122,8 @@ def forgot_password(request: Request, data: PasswordResetRequest, db: Session = 
         except Exception:
             db.delete(record)
             db.commit()
-            # Keep the response generic; provider errors are logged by the server.
-            print("Password reset email delivery failed")
+            # Keep the response generic; details were logged by the sender.
+            logger.error("Password reset email was not accepted; reset token record removed")
     return {"message": "If an account exists for that email, a password reset link has been sent."}
 
 
