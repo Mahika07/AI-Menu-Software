@@ -562,34 +562,6 @@ function PublicMenu() {
         </div>
       </header>
 
-      {activeOrder && (
-        <section className="order-status-banner" aria-live="polite">
-          <div className="order-status-icon">
-            <ClipboardCheck size={24} />
-          </div>
-
-          <div className="order-status-copy">
-            <strong>
-              {ORDER_STATUS_LABELS[activeOrder.status] || activeOrder.status}
-            </strong>
-            <span>
-              Order #{activeOrder.order_number.slice(0, 8)} · Table{" "}
-              {activeOrder.table_number}
-            </span>
-            <span>Total: {formatMoney(activeOrder.total_amount)}</span>
-          </div>
-
-          <button
-            type="button"
-            className="order-status-refresh"
-            onClick={refreshOrderStatus}
-            aria-label="Refresh order status"
-          >
-            <RefreshCw size={18} />
-          </button>
-        </section>
-      )}
-
       {trackingError && <p className="order-inline-error">{trackingError}</p>}
 
       {tableOrders.length > 0 && (
