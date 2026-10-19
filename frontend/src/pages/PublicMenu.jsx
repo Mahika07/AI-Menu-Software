@@ -24,6 +24,7 @@ import {
   getTableOrders,
   getOrCreateDiningSession,
   startNewDiningSession,
+  cancelTableOrderItem,
 } from "../api/orders";
 import DishDetails from "../components/DishDetails";
 import AIAssistant from "../components/AIAssistant";
@@ -493,6 +494,59 @@ function PublicMenu() {
     }
   }
 
+  async function handleCancelOrderItem(order, item) {
+    if ((item.status || "pending").toLowerCase() !== "pending") {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Cancel "${item.dish_name}" from this order?`,
+    );
+
+    if (!confirmed) return;
+
+    setTrackingError("");
+
+    try {
+      const updatedOrder = await cancelTableOrderItem(
+        qrToken,
+        order.order_number,
+        item.id,
+      );
+
+      setTableOrders((current) =>
+        current.map((entry) =>
+          entry.order_number === updatedOrder.order_number
+            ? updatedOrder
+            : entry,
+        ),
+      );
+
+      if (activeOrder?.order_number === updatedOrder.order_number) {
+        setActiveOrder(updatedOrder);
+      }
+    } catch (err) {
+      setTrackingError(
+        err.response?.data?.detail ||
+          "Unable to cancel this item. Refresh the order and try again.",
+      );
+
+      // Refresh the displayed order in case its status changed
+      // while the cancellation request was being processed.
+      try {
+        const latest = await getOrderStatus(order.order_number);
+
+        setTableOrders((current) =>
+          current.map((entry) =>
+            entry.order_number === latest.order_number ? latest : entry,
+          ),
+        );
+      } catch {
+        // Keep the original cancellation error visible.
+      }
+    }
+  }
+
   if (loading) {
     return (
       <div className="public-menu-page">
@@ -563,7 +617,6 @@ function PublicMenu() {
       </header>
 
       {trackingError && <p className="order-inline-error">{trackingError}</p>}
-
 
       {tableOrdersError && (
         <section className="table-orders-error" role="alert">
@@ -952,7 +1005,9 @@ function PublicMenu() {
                       <strong>#{order.order_number}</strong>
 
                       <span>Table</span>
-                      <strong>{order.table_number || menu.table_number || "—"}</strong>
+                      <strong>
+                        {order.table_number || menu.table_number || "—"}
+                      </strong>
 
                       <span>Order status</span>
                       <strong>
@@ -971,13 +1026,31 @@ function PublicMenu() {
                           <p>
                             {item.quantity} × {formatMoney(item.unit_price)}
                           </p>
-                          {item.special_instructions && <p>{item.special_instructions}</p>}
+                          {item.special_instructions && (
+                            <p>{item.special_instructions}</p>
+                          )}
                         </div>
+
                         <div className="my-order-item-right">
                           <strong>{formatMoney(item.line_total)}</strong>
-                          <span className={`my-item-status status-${item.status || "pending"}`}>
+
+                          <span
+                            className={`my-item-status status-${item.status || "pending"}`}
+                          >
                             {(item.status || "pending").replaceAll("_", " ")}
                           </span>
+
+                          {(item.status || "pending").toLowerCase() ===
+                            "pending" && (
+                            <button
+                              type="button"
+                              className="cancel-order-item-button"
+                              onClick={() => handleCancelOrderItem(order, item)}
+                              aria-label={`Cancel ${item.dish_name}`}
+                            >
+                              Cancel item
+                            </button>
+                          )}
                         </div>
                       </article>
                     ))}
@@ -987,17 +1060,26 @@ function PublicMenu() {
                       className="order-secondary-button"
                       onClick={async () => {
                         try {
-                          const latest = await getOrderStatus(order.order_number);
-                          setTableOrders((current) => current.map((entry) =>
-                            entry.order_number === latest.order_number ? latest : entry
-                          ));
-                          if (activeOrder?.order_number === latest.order_number) {
+                          const latest = await getOrderStatus(
+                            order.order_number,
+                          );
+                          setTableOrders((current) =>
+                            current.map((entry) =>
+                              entry.order_number === latest.order_number
+                                ? latest
+                                : entry,
+                            ),
+                          );
+                          if (
+                            activeOrder?.order_number === latest.order_number
+                          ) {
                             setActiveOrder(latest);
                           }
                           setTrackingError("");
                         } catch (err) {
                           setTrackingError(
-                            err.response?.data?.detail || "Unable to refresh order status."
+                            err.response?.data?.detail ||
+                              "Unable to refresh order status.",
                           );
                         }
                       }}
@@ -1008,7 +1090,9 @@ function PublicMenu() {
                   </article>
                 ))}
 
-                {trackingError && <p className="order-inline-error">{trackingError}</p>}
+                {trackingError && (
+                  <p className="order-inline-error">{trackingError}</p>
+                )}
               </div>
             ) : cart.length === 0 ? (
               <div className="order-empty-state">
@@ -1214,7 +1298,6 @@ function PublicMenu() {
           </section>
         </div>
       )}
-
     </div>
   );
 }

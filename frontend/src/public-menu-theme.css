@@ -1541,3 +1541,27 @@
     padding: 16px;
   }
 }
+
+.cancel-order-item-button {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border: 1px solid #dc2626;
+  border-radius: 10px;
+  background: #fff;
+  color: #b91c1c;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.cancel-order-item-button:hover {
+  background: #dc2626;
+  color: #fff;
+}
+
+.cancel-order-item-button:focus-visible {
+  outline: 2px solid #dc2626;
+  outline-offset: 3px;
+}

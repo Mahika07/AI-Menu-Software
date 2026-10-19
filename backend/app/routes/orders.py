@@ -294,3 +294,130 @@ def get_active_table_orders(
         .limit(50)
         .all()
     )
+
+@router.post(
+    "/tables/{qr_token}/orders/{order_number}/items/{item_id}/cancel",
+    response_model=PublicOrderStatusResponse,
+)
+@limiter.limit("10/minute")
+def cancel_public_order_item(
+    qr_token: str,
+    order_number: str,
+    item_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    x_dining_session_token: str = Header(
+        default="",
+        alias="X-Dining-Session-Token",
+    ),
+):
+    """Cancel one pending item belonging to the current dining session."""
+    from sqlalchemy import select
+
+    table, branch, dining_session = get_valid_dining_session(
+        qr_token,
+        x_dining_session_token,
+        db,
+    )
+
+    # Lock the order while validating and changing the item.
+    order = (
+        db.query(Order)
+        .options(selectinload(Order.items))
+        .filter(
+            Order.order_number == order_number,
+            Order.branch_id == branch.id,
+            Order.table_id == table.id,
+            Order.dining_session_id == dining_session.id,
+        )
+        .with_for_update()
+        .first()
+    )
+
+    if order is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Order not found in this dining session.",
+        )
+
+    if order.status in {"completed", "cancelled"}:
+        raise HTTPException(
+            status_code=409,
+            detail="This order is already closed.",
+        )
+
+    item = next(
+        (entry for entry in order.items if entry.id == item_id),
+        None,
+    )
+
+    if item is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Order item not found.",
+        )
+
+    if (item.status or "pending") != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail="Only pending items can be cancelled.",
+        )
+
+    try:
+        item.status = "cancelled"
+        item.status_updated_at = datetime.now(timezone.utc)
+
+        # Recalculate the amount from items that have not been cancelled.
+        remaining_total = money(
+            sum(
+                (
+                    Decimal(str(entry.line_total))
+                    for entry in order.items
+                    if entry.status != "cancelled"
+                ),
+                Decimal("0.00"),
+            )
+        )
+
+        order.subtotal = remaining_total
+        order.total_amount = remaining_total
+
+        statuses = [
+            entry.status or "pending"
+            for entry in order.items
+        ]
+
+        if all(value == "cancelled" for value in statuses):
+            order.status = "cancelled"
+        elif "preparing" in statuses:
+            order.status = "preparing"
+        elif "pending" in statuses:
+            order.status = (
+                "confirmed"
+                if order.status == "confirmed"
+                else "pending"
+            )
+        elif all(
+            value in {"ready", "served", "cancelled"}
+            for value in statuses
+        ):
+            if any(value == "ready" for value in statuses):
+                order.status = "ready"
+            elif any(value == "served" for value in statuses):
+                order.status = "completed"
+            else:
+                order.status = "cancelled"
+
+        order.updated_at = datetime.now(timezone.utc)
+
+        db.commit()
+
+        return (
+            db.query(Order)
+            .options(selectinload(Order.items))
+            .filter(Order.id == order.id)
+            .one()
+        )
+    except Exception:
+        db.rollback()
+        raise
