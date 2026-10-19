@@ -1,3 +1,4 @@
+
 import api from "./client";
 
 export async function login(email, password) {
@@ -11,22 +12,11 @@ export async function login(email, password) {
 
 export async function getCurrentUser() {
     const response = await api.get("/auth/me");
-
     return response.data;
 }
-
 
 export async function updateCurrentUser(profileData) {
-    const response = await api.patch("/auth/me", {
-        full_name: profileData.full_name.trim(),
-        email: profileData.email.trim().toLowerCase(),
-    });
-
-    return response.data;
-}
-
-export async function updateCurrentUser(data) {
-    const response = await api.patch("/auth/me", data);
+    const response = await api.patch("/auth/me", profileData);
     return response.data;
 }
 
