@@ -39,7 +39,12 @@ def _safe_provider_message(value: object) -> str:
     message = str(value or "")
     message = re.sub(r"https?://\S+", "[url]", message, flags=re.IGNORECASE)
     message = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[email]", message)
-    message = re.sub(r"(?i)(token|key|secret|password)\s*[:=]\s*\S+", r"\1=[redacted]", message)
+    message = re.sub(
+        r'(?i)(["\']?(?:token|api[_-]?key|key|secret|password|authorization|email|to|url|reset[_-]?url)["\']?)\s*:\s*["\']?[^,"\'\s}]+["\']?',
+        r'\1:"[redacted]"',
+        message,
+    )
+    message = re.sub(r"(?i)(token|api[_-]?key|key|secret|password)\s*[:=]\s*\S+", r"\1=[redacted]", message)
     message = " ".join(message.split())
     return message[:300]
 
@@ -55,6 +60,11 @@ def _provider_error_details(body: bytes) -> tuple[str | None, str | None]:
     message = parsed.get("message") or parsed.get("error")
     safe_code = re.sub(r"[^A-Za-z0-9_.-]", "", str(code))[:80] if code else None
     return safe_code, _safe_provider_message(message) if message else None
+
+
+def _safe_provider_body(body: bytes) -> str:
+    decoded = body.decode("utf-8", errors="replace")
+    return _safe_provider_message(decoded) or "unavailable"
 
 
 def _send_password_reset_email(email: str, token: str) -> None:
@@ -87,13 +97,15 @@ def _send_password_reset_email(email: str, token: str) -> None:
     try:
         with urllib.request.urlopen(req, timeout=10) as response:
             if response.status >= 300:
-                code, message = _provider_error_details(response.read())
-                logger.error("Password reset email provider rejected request provider=resend http_status=%s error_code=%s error_message=%s", response.status, code or "unknown", message or "unavailable")
+                body = response.read()
+                code, message = _provider_error_details(body)
+                logger.error("Password reset email provider rejected request provider=resend http_status=%s error_code=%s error_message=%s response_body=%s", response.status, code or "unknown", message or "unavailable", _safe_provider_body(body))
                 raise RuntimeError("Email provider rejected the message")
             logger.info("Password reset email accepted by provider=resend http_status=%s", response.status)
     except urllib.error.HTTPError as exc:
-        code, message = _provider_error_details(exc.read())
-        logger.error("Password reset email provider rejected request provider=resend http_status=%s error_code=%s error_message=%s", exc.code, code or "unknown", message or "unavailable")
+        body = exc.read()
+        code, message = _provider_error_details(body)
+        logger.error("Password reset email provider rejected request provider=resend http_status=%s error_code=%s error_message=%s response_body=%s", exc.code, code or "unknown", message or "unavailable", _safe_provider_body(body))
         raise RuntimeError("Email provider rejected the message") from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         logger.error("Password reset email provider request failed provider=resend error_type=%s error_message=%s", type(exc).__name__, _safe_provider_message(exc))

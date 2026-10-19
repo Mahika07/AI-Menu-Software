@@ -167,7 +167,7 @@ def test_resend_success_is_logged_as_provider_acceptance(monkeypatch, caplog):
 def test_resend_http_failure_logs_sanitized_provider_details(monkeypatch, caplog):
     monkeypatch.setattr(auth_routes.settings, "RESEND_API_KEY", "test-secret")
     monkeypatch.setattr(auth_routes.settings, "EMAIL_FROM", "Smart Menu <noreply@example.com>")
-    body = json.dumps({"name": "validation_error", "message": "Invalid sender owner@example.com https://secret.example/reset?token=private"}).encode()
+    body = json.dumps({"name": "validation_error", "message": "Invalid sender owner@example.com https://secret.example/reset?token=private", "token": "private-reset-token"}).encode()
 
     def reject(*args, **kwargs):
         raise urllib.error.HTTPError("https://api.resend.com/emails", 422, "Unprocessable", {}, io.BytesIO(body))
@@ -178,6 +178,19 @@ def test_resend_http_failure_logs_sanitized_provider_details(monkeypatch, caplog
     assert "http_status=422" in caplog.text
     assert "validation_error" in caplog.text
     assert "Invalid sender [email] [url]" in caplog.text
+    assert "response_body=" in caplog.text
     assert "owner@example.com" not in caplog.text
     assert "private-reset-token" not in caplog.text
+    assert '"token":"[redacted]"' in caplog.text
     assert "secret.example" not in caplog.text
+
+
+def test_resend_missing_configuration_logs_only_variable_name(monkeypatch, caplog):
+    monkeypatch.setattr(auth_routes.settings, "RESEND_API_KEY", None)
+    monkeypatch.setattr(auth_routes.settings, "EMAIL_FROM", "Smart Menu <noreply@example.com>")
+    with pytest.raises(RuntimeError, match="not configured"):
+        auth_routes._send_password_reset_email("owner@example.com", "private-reset-token")
+    assert "variables=RESEND_API_KEY" in caplog.text
+    assert "test-secret" not in caplog.text
+    assert "owner@example.com" not in caplog.text
+    assert "private-reset-token" not in caplog.text
