@@ -139,7 +139,7 @@
   box-shadow: 0 8px 16px rgba(20, 52, 74, 0.22);
 }
 
-.public-menu-page .restaurant-brand > div {
+.public-menu-page .restaurant-brand>div {
   min-width: 0;
 }
 
@@ -282,7 +282,7 @@
   margin-bottom: 12px;
 }
 
-.public-menu-page .table-orders-panel-header > div > span {
+.public-menu-page .table-orders-panel-header>div>span {
   font-size: 12px;
   font-weight: 700;
   color: var(--pm-blue);
@@ -322,7 +322,7 @@
   background: rgba(255, 255, 255, 0.8);
 }
 
-.public-menu-page .table-order-card > header {
+.public-menu-page .table-order-card>header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -395,7 +395,7 @@
   height: 180px;
 }
 
-.public-menu-page .menu-hero > * {
+.public-menu-page .menu-hero>* {
   position: relative;
   z-index: 1;
 }
@@ -465,7 +465,7 @@
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.28);
 }
 
-.public-menu-page .menu-hero-art img + img {
+.public-menu-page .menu-hero-art img+img {
   margin-left: -34px;
 }
 
@@ -763,7 +763,7 @@
   color: var(--pm-muted);
 }
 
-.public-menu-page .menu-category-header > span {
+.public-menu-page .menu-category-header>span {
   min-width: 30px;
   padding: 4px 10px;
   border-radius: 999px;
@@ -1301,7 +1301,7 @@
   background: #e8f2f9;
 }
 
-.public-menu-page .order-cart-summary > div {
+.public-menu-page .order-cart-summary>div {
   width: 100%;
   display: flex;
   justify-content: space-between;
@@ -1442,6 +1442,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   .public-menu-page .dish-card,
   .public-menu-page .dish-add-button,
   .public-menu-page .category-chip-icon,
@@ -1478,4 +1479,65 @@
   background: linear-gradient(135deg, var(--pm-navy), var(--pm-blue));
   color: #fff;
   font-weight: 700;
+}
+
+/* Keep the order overlay within the viewport */
+.order-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  justify-content: flex-end;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+/* Keep the panel within the screen height */
+.order-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 540px);
+  height: 100%;
+  max-height: 100vh;
+  max-height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+/* Keep the title and close button visible */
+.order-panel-header {
+  flex-shrink: 0;
+}
+
+/* Make the orders list independently scrollable */
+.my-order-details {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 20px 30px;
+}
+
+/* Give each order enough separation */
+.my-table-order {
+  margin-bottom: 20px;
+}
+
+/* Mobile layout */
+@media (max-width: 600px) {
+  .order-overlay {
+    justify-content: center;
+  }
+
+  .order-panel {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .my-order-details {
+    padding: 16px;
+  }
 }
