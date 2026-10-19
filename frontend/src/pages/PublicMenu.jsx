@@ -14,6 +14,7 @@ import {
   ClipboardCheck,
   Clock,
   RefreshCw,
+  ArrowRight,
 } from "lucide-react";
 
 import { getPublicMenu } from "../api/menu";
@@ -35,6 +36,8 @@ const formatMoney = (value) =>
     maximumFractionDigits: 2,
   }).format(Number(value || 0));
 
+const formatDishPrice = (value) => formatMoney(value).replace(/\.00$/, "");
+
 const ORDER_STATUS_LABELS = {
   pending: "Order received",
   confirmed: "Order confirmed",
@@ -43,6 +46,13 @@ const ORDER_STATUS_LABELS = {
   completed: "Completed",
   cancelled: "Cancelled",
 };
+
+function dietMarkClass(type) {
+  if (type === "Non-Vegetarian") return "nonveg";
+  if (type === "Egg") return "egg";
+  if (type === "Vegetarian" || type === "Vegan") return "veg";
+  return "";
+}
 
 function PublicMenu() {
   const { qrToken } = useParams();
@@ -256,7 +266,6 @@ function PublicMenu() {
     });
 
     setCheckoutError("");
-    setCartOpen(true);
 
     track({
       eventType: "ADD_TO_CART",
@@ -370,6 +379,45 @@ function PublicMenu() {
     return () => window.clearTimeout(timeout);
   }, [search, analyticsBranchId, filteredDishCount, track]);
 
+  const [activeCategory, setActiveCategory] = useState(null);
+
+  function scrollToCategory(categoryId) {
+    setActiveCategory(categoryId);
+
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+
+    document.getElementById(`category-${categoryId}`)?.scrollIntoView({
+      behavior: reduceMotion ? "auto" : "smooth",
+      block: "start",
+    });
+  }
+
+  // Highlight the category chip that matches the section being read.
+  useEffect(() => {
+    if (!filteredCategories.length || !("IntersectionObserver" in window)) {
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.find((entry) => entry.isIntersecting);
+        if (visible) {
+          setActiveCategory(Number(visible.target.dataset.categoryId));
+        }
+      },
+      { rootMargin: "-35% 0px -55% 0px" },
+    );
+
+    filteredCategories.forEach((category) => {
+      const node = document.getElementById(`category-${category.id}`);
+      if (node) observer.observe(node);
+    });
+
+    return () => observer.disconnect();
+  }, [filteredCategories]);
+
   async function submitOrder(event) {
     event.preventDefault();
 
@@ -470,8 +518,15 @@ function PublicMenu() {
     );
   }
 
+  const heroDishes = (menu.categories || [])
+    .flatMap((category) => category.dishes)
+    .filter((dish) => dish.image_url)
+    .slice(0, 3);
+
+  const showCartBar = cartCount > 0 && !cartOpen && !checkoutOpen;
+
   return (
-    <div className="public-menu-page">
+    <div className={`public-menu-page ${showCartBar ? "has-cart-bar" : ""}`}>
       <header className="public-menu-header">
         <div className="public-menu-header-content">
           <div className="restaurant-brand">
@@ -499,7 +554,7 @@ function PublicMenu() {
             onClick={() => setCartOpen(true)}
           >
             <ShoppingBag size={19} />
-            <span>My order</span>
+            <span className="order-header-label">My order</span>
             <span className="order-count">
               {activeOrder ? (activeOrder.items?.length ?? 0) : cartCount}
             </span>
@@ -638,6 +693,38 @@ function PublicMenu() {
         </section>
       )}
 
+      {!hasFilters && filteredCategories.length > 0 && (
+        <section className="menu-hero">
+          <div className="menu-hero-copy">
+            <span className="menu-hero-eyebrow">
+              Welcome{menu.table_number ? ` · Table ${menu.table_number}` : ""}
+            </span>
+            <h2>Fresh from our kitchen to your table</h2>
+            <p>Pick your favourites and order right from your seat.</p>
+            <button
+              type="button"
+              className="menu-hero-button"
+              onClick={() => scrollToCategory(filteredCategories[0].id)}
+            >
+              Browse menu
+              <ArrowRight size={17} />
+            </button>
+          </div>
+
+          <div className="menu-hero-art" aria-hidden="true">
+            {heroDishes.length > 0 ? (
+              heroDishes.map((dish) => (
+                <img key={dish.id} src={dish.image_url} alt="" />
+              ))
+            ) : (
+              <span className="menu-hero-art-icon">
+                <Utensils size={44} />
+              </span>
+            )}
+          </div>
+        </section>
+      )}
+
       <section className="public-menu-controls">
         <div className="public-menu-search">
           <Search size={20} />
@@ -666,7 +753,7 @@ function PublicMenu() {
           onClick={() => setShowFilters((current) => !current)}
         >
           <SlidersHorizontal size={18} />
-          Filters
+          <span className="filter-button-label">Filters</span>
         </button>
       </section>
 
@@ -714,6 +801,35 @@ function PublicMenu() {
         </section>
       )}
 
+      {filteredCategories.length > 1 && (
+        <nav className="category-chips" aria-label="Menu categories">
+          {filteredCategories.map((category) => {
+            const cover = category.dishes.find((dish) => dish.image_url);
+
+            return (
+              <button
+                type="button"
+                key={category.id}
+                className={`category-chip ${
+                  activeCategory === category.id ? "active" : ""
+                }`}
+                onClick={() => scrollToCategory(category.id)}
+                aria-current={activeCategory === category.id}
+              >
+                <span className="category-chip-icon">
+                  {cover ? (
+                    <img src={cover.image_url} alt="" />
+                  ) : (
+                    <Utensils size={22} />
+                  )}
+                </span>
+                <span className="category-chip-label">{category.name}</span>
+              </button>
+            );
+          })}
+        </nav>
+      )}
+
       <div className="public-menu-summary">
         <span>
           {filteredDishCount} {filteredDishCount === 1 ? "dish" : "dishes"}
@@ -739,7 +855,12 @@ function PublicMenu() {
           </div>
         ) : (
           filteredCategories.map((category) => (
-            <section className="menu-category" key={category.id}>
+            <section
+              className="menu-category"
+              key={category.id}
+              id={`category-${category.id}`}
+              data-category-id={category.id}
+            >
               <div className="menu-category-header">
                 <div>
                   <h2>{category.name}</h2>
@@ -769,6 +890,7 @@ function PublicMenu() {
                           src={dish.image_url}
                           alt={dish.name}
                           className="dish-image"
+                          loading="lazy"
                         />
                       ) : (
                         <div className="dish-image-placeholder">
@@ -776,43 +898,36 @@ function PublicMenu() {
                         </div>
                       )}
 
+                      {dietMarkClass(dish.dietary_type) && (
+                        <span
+                          className={`dish-diet-mark ${dietMarkClass(dish.dietary_type)}`}
+                          title={dish.dietary_type}
+                        />
+                      )}
+
                       {!dish.is_available && (
-                        <div className="dish-unavailable">
-                          Currently unavailable
-                        </div>
+                        <div className="dish-unavailable">Unavailable</div>
                       )}
                     </div>
 
                     <div className="dish-card-content">
-                      <div className="dish-title-row">
-                        <h3>{dish.name}</h3>
-                        <span className="dish-price">
-                          {formatMoney(dish.price)}
-                        </span>
-                      </div>
+                      <h3>{dish.name}</h3>
 
                       {dish.description && (
                         <p className="dish-description">{dish.description}</p>
                       )}
 
                       <div className="dish-tags">
-                        {dish.dietary_type === "Vegetarian" && (
-                          <span className="dish-tag vegetarian">
-                            <Leaf size={14} />
-                            Vegetarian
-                          </span>
-                        )}
-
                         {dish.dietary_type === "Vegan" && (
                           <span className="dish-tag vegan">
-                            <Leaf size={14} />
+                            <Leaf size={12} />
                             Vegan
                           </span>
                         )}
 
                         {dish.spice_level && (
                           <span className="dish-tag spice">
-                            <Flame size={14} />
+                            <Flame size={12} />
                             {dish.spice_level}
                           </span>
                         )}
@@ -825,19 +940,21 @@ function PublicMenu() {
                       </div>
 
                       <div className="dish-card-actions">
-                        <span className="dish-view-more">View details</span>
+                        <span className="dish-price">
+                          {formatDishPrice(dish.price)}
+                        </span>
 
                         <button
                           type="button"
                           className="dish-add-button"
                           disabled={!dish.is_available}
+                          aria-label={`Add ${dish.name} to order`}
                           onClick={(event) => {
                             event.stopPropagation();
                             addToCart(dish);
                           }}
                         >
-                          <Plus size={16} />
-                          Add
+                          <Plus size={18} />
                         </button>
                       </div>
                     </div>
@@ -864,6 +981,25 @@ function PublicMenu() {
         branchId={analyticsBranchId}
         tableId={analyticsTableId}
       />
+
+      {showCartBar && (
+        <button
+          type="button"
+          className="cart-bar"
+          onClick={() => setCartOpen(true)}
+        >
+          <span className="cart-bar-info">
+            <span className="cart-bar-count">
+              {cartCount} {cartCount === 1 ? "item" : "items"}
+            </span>
+            <strong>{formatMoney(cartSubtotal)}</strong>
+          </span>
+          <span className="cart-bar-action">
+            View order
+            <ArrowRight size={18} />
+          </span>
+        </button>
+      )}
 
       <footer className="public-menu-footer">
         <p>Powered by Smart Menu</p>
