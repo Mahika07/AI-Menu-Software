@@ -3,7 +3,7 @@ import api from "./client";
 // Get bills for a branch (basic, non-paginated endpoint)
 export async function getBranchBills(branchId, limit = 100) {
     const response = await api.get(
-        `/ branches / ${encodeURIComponent(branchId)}/bills`,
+        `/branches/${encodeURIComponent(branchId)}/bills`,
         {
             params: { limit },
         },
