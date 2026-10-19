@@ -10,7 +10,9 @@ from app.schemas.auth import (
     UserLogin,
     LoginResponse,
     UserResponse,
+    UserProfileUpdate,
 )
+
 from app.core.dependencies import get_current_user
 router = APIRouter(
     prefix="/auth",
@@ -155,3 +157,58 @@ def get_me(
     current_user: User = Depends(get_current_user),
 ):
     return current_user
+
+
+@router.patch(
+    "/me",
+    response_model=UserResponse,
+)
+def update_me(
+    profile_data: UserProfileUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update the authenticated user's profile."""
+    full_name = profile_data.full_name.strip()
+    email = str(profile_data.email).strip().lower()
+
+    if not full_name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Full name cannot be empty.",
+        )
+
+    existing_user = (
+        db.query(User)
+        .filter(
+            User.email == email,
+            User.id != current_user.id,
+        )
+        .first()
+    )
+
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email already exists.",
+        )
+
+    current_user.full_name = full_name
+    current_user.email = email
+
+    try:
+        db.commit()
+        db.refresh(current_user)
+        return current_user
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email already exists.",
+        )
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not update profile.",
+        )

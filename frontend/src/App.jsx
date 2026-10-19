@@ -21,6 +21,7 @@ import DiningSessions from "./pages/DiningSessions";
 import BillReceiptPage from "./pages/BillReceiptPage";
 import Bills from "./pages/Bills";
 import RevenueAnalytics from "./pages/RevenueAnalytics";
+import Profile from "./pages/Profile";
 
 function ProtectedLayout({ children }) {
   return (
@@ -201,7 +202,14 @@ function App() {
           path="/reviews"
           element={<Navigate to="/dashboard/reviews" replace />}
         />
-
+        <Route
+          path="/dashboard/profile"
+          element={
+            <ProtectedLayout>
+              <Profile />
+            </ProtectedLayout>
+          }
+        />
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

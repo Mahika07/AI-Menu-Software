@@ -48,3 +48,7 @@ class UserResponse(BaseModel):
     model_config = {
         "from_attributes": True
     }
+
+class UserProfileUpdate(BaseModel):
+    full_name: str = Field(min_length=1, max_length=120)
+    email: EmailStr
