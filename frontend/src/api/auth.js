@@ -24,3 +24,13 @@ export async function updateCurrentUser(profileData) {
 
     return response.data;
 }
+
+export async function updateCurrentUser(data) {
+    const response = await api.patch("/auth/me", data);
+    return response.data;
+}
+
+export async function changePassword(data) {
+    const response = await api.post("/auth/change-password", data);
+    return response.data;
+}

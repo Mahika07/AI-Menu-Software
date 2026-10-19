@@ -11,8 +11,8 @@ from app.schemas.auth import (
     LoginResponse,
     UserResponse,
     UserProfileUpdate,
+    PasswordChangeRequest,
 )
-
 from app.core.dependencies import get_current_user
 router = APIRouter(
     prefix="/auth",
@@ -211,4 +211,47 @@ def update_me(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not update profile.",
+        )
+
+
+@router.post("/change-password")
+def change_password(
+    password_data: PasswordChangeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Change the authenticated user's password."""
+
+    if not verify_password(
+        password_data.current_password,
+        current_user.password_hash,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Your current password is incorrect.",
+        )
+
+    if password_data.current_password == password_data.new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The new password must differ from the current password.",
+        )
+
+    try:
+        current_user.password_hash = hash_password(
+            password_data.new_password
+        )
+
+        db.commit()
+
+        return {
+            "message": "Password updated successfully."
+        }
+
+    except Exception:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not update your password.",
         )
