@@ -211,19 +211,7 @@ export async function cancelTableOrderItem(qrToken, orderNumber, itemId) {
 }
 
 
-export async function cancelTableOrderItem(qrToken, orderNumber, itemId) {
-    return sessionRequest(qrToken, async (token) => {
-        const response = await api.post(
-            `/public/tables/${encodeURIComponent(token)}/orders/${encodeURIComponent(orderNumber)}/items/${encodeURIComponent(itemId)}/cancel`,
-            {},
-            {
-                headers: getSessionHeaders(token),
-            },
-        );
 
-        return response.data;
-    });
-}
 
 export async function getBranchOrders(
     branchId,
