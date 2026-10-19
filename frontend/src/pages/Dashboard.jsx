@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+
 import {
   Store,
   GitBranch,
@@ -12,6 +13,9 @@ import {
   Wallet,
   ReceiptText,
   ShoppingBag,
+  ChevronDown,
+  UserRound,
+  LogOut,
 } from "lucide-react";
 
 import { getCurrentUser } from "../api/auth";
@@ -24,6 +28,9 @@ function Dashboard() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+
+  const profileMenuRef = useRef(null);
 
   async function loadDashboard() {
     try {
@@ -55,6 +62,45 @@ function Dashboard() {
   useEffect(() => {
     loadDashboard();
   }, []);
+
+  // Close profile menu when clicking outside or pressing Escape.
+  useEffect(() => {
+    if (!profileMenuOpen) return;
+
+    function handleOutsideClick(event) {
+      if (
+        profileMenuRef.current &&
+        !profileMenuRef.current.contains(event.target)
+      ) {
+        setProfileMenuOpen(false);
+      }
+    }
+
+    function handleEscape(event) {
+      if (event.key === "Escape") {
+        setProfileMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleOutsideClick);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [profileMenuOpen]);
+
+  function handleLogout() {
+    setProfileMenuOpen(false);
+    localStorage.removeItem("access_token");
+    navigate("/login", { replace: true });
+  }
+
+  function handleProfileClick() {
+    setProfileMenuOpen(false);
+    navigate("/dashboard/profile");
+  }
 
   const statCards = [
     {
@@ -141,12 +187,16 @@ function Dashboard() {
   ];
 
   const firstName = user?.full_name ? user.full_name.split(" ")[0] : "";
+
   const totalDishes = stats?.dishes ?? 0;
   const availableDishes = stats?.available_dishes ?? 0;
+
   const unavailableDishes = Math.max(totalDishes - availableDishes, 0);
+
   const availablePct = totalDishes
     ? Math.round((availableDishes / totalDishes) * 100)
     : 0;
+
   const show = (value) => (loading ? "—" : value);
 
   return (
@@ -154,7 +204,10 @@ function Dashboard() {
       {/* Top bar */}
       <header className="dx-top">
         <div className="dx-greeting">
-          <small>Welcome back{firstName ? `, ${firstName}` : ""}</small>
+          <small>
+            Welcome back
+            {firstName ? `, ${firstName}` : ""}
+          </small>
           <h1>Dashboard</h1>
         </div>
 
@@ -170,16 +223,68 @@ function Dashboard() {
             <RefreshCw size={18} className={loading ? "spin" : ""} />
           </button>
 
+          {/* Owner profile dropdown */}
           {user && (
-            <div className="dx-user">
-              <div className="dx-avatar">
-                {(user.full_name || user.email || "U").charAt(0).toUpperCase()}
-              </div>
+            <div className="dx-profile-wrapper" ref={profileMenuRef}>
+              <button
+                type="button"
+                className="dx-user dx-user-trigger"
+                onClick={() => setProfileMenuOpen((previous) => !previous)}
+                aria-label="Open account menu"
+                aria-expanded={profileMenuOpen}
+                aria-haspopup="menu"
+              >
+                <div className="dx-avatar">
+                  {(user.full_name || user.email || "U")
+                    .charAt(0)
+                    .toUpperCase()}
+                </div>
 
-              <div className="dx-user-text">
-                <strong>{user.full_name || "Restaurant Owner"}</strong>
-                <span>{user.email}</span>
-              </div>
+                <div className="dx-user-text">
+                  <strong>{user.full_name || "Restaurant Owner"}</strong>
+                  <span>{user.email}</span>
+                </div>
+
+                <ChevronDown
+                  size={17}
+                  className={
+                    profileMenuOpen
+                      ? "dx-profile-chevron open"
+                      : "dx-profile-chevron"
+                  }
+                />
+              </button>
+
+              {profileMenuOpen && (
+                <div className="dx-profile-menu" role="menu">
+                  <div className="dx-profile-menu-header">
+                    <strong>{user.full_name || "Restaurant Owner"}</strong>
+                    <span>{user.email}</span>
+                  </div>
+
+                  <div className="dx-profile-menu-divider" />
+
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={handleProfileClick}
+                  >
+                    <UserRound size={18} />
+                    <span>My Profile</span>
+                    <ArrowRight size={15} className="dx-profile-arrow" />
+                  </button>
+
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="dx-profile-logout"
+                    onClick={handleLogout}
+                  >
+                    <LogOut size={18} />
+                    <span>Logout</span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -210,7 +315,9 @@ function Dashboard() {
             >
               <div
                 className="dx-bar-fill"
-                style={{ "--pct": `${loading ? 0 : availablePct}%` }}
+                style={{
+                  "--pct": `${loading ? 0 : availablePct}%`,
+                }}
               />
             </div>
 
@@ -219,10 +326,12 @@ function Dashboard() {
                 <span>Total dishes</span>
                 <strong>{show(totalDishes)}</strong>
               </div>
+
               <div className="dx-figure">
                 <span>Available</span>
                 <strong>{show(availableDishes)}</strong>
               </div>
+
               <div className="dx-figure">
                 <span>Unavailable</span>
                 <strong>{show(unavailableDishes)}</strong>
@@ -277,7 +386,9 @@ function Dashboard() {
                   </div>
 
                   <div className="dx-stat-label">{card.label}</div>
+
                   <div className="dx-stat-value">{show(card.value)}</div>
+
                   <div className="dx-stat-note">{card.description}</div>
                 </div>
               );
