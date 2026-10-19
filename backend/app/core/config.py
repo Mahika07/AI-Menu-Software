@@ -11,6 +11,9 @@ class Settings(BaseSettings):
 
     FRONTEND_URL: str
     API_HOST: str
+    RESEND_API_KEY: str | None = None
+    EMAIL_FROM: str = "Smart Menu <onboarding@resend.dev>"
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 30
     ENVIRONMENT: str = "development"
     CLOUDINARY_CLOUD_NAME: str
     CLOUDINARY_API_KEY: str

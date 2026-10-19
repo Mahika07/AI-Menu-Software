@@ -22,6 +22,8 @@ import BillReceiptPage from "./pages/BillReceiptPage";
 import Bills from "./pages/Bills";
 import RevenueAnalytics from "./pages/RevenueAnalytics";
 import Profile from "./pages/Profile";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 
 function ProtectedLayout({ children }) {
   return (
@@ -43,6 +45,8 @@ function App() {
         {/* Authentication */}
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
 
         {/* Dashboard */}
         <Route

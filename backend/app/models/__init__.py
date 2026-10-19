@@ -9,6 +9,7 @@ from app.models.analytics import AnalyticsEvent
 from app.models.order import Order, OrderItem
 from app.models.dining_session import DiningSession
 from app.models.bill import Bill
+from app.models.password_reset_token import PasswordResetToken
 __all__ = [
     "User",
     "Restaurant",
@@ -22,4 +23,5 @@ __all__ = [
     "OrderItem",
     "DiningSession",
     "Bill",
+    "PasswordResetToken",
 ]

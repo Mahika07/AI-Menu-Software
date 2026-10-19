@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Link } from "react-router-dom";
 import { login } from "../api/auth";
 
 function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -38,6 +39,8 @@ function Login() {
 
         <p className="auth-subtitle">Restaurant Admin</p>
 
+        {location.state?.message && <div className="success-message" role="status">{location.state.message}</div>}
+
         {error && <div className="error-message">{error}</div>}
 
         <label>Email</label>
@@ -59,6 +62,10 @@ function Login() {
           placeholder="••••••••"
           required
         />
+
+        <div className="auth-reset-link">
+          <Link to="/forgot-password">Forgot Password?</Link>
+        </div>
 
         <button type="submit" disabled={loading}>
           {loading ? "Signing in..." : "Sign in"}
