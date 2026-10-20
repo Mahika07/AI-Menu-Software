@@ -189,6 +189,24 @@ def configure_brevo(monkeypatch):
     monkeypatch.setattr(auth_routes.settings, "FRONTEND_URL", "https://ai-menu-software.vercel.app")
 
 
+def test_settings_load_brevo_api_key_from_exact_environment_name(monkeypatch):
+    from app.core.config import Settings
+
+    monkeypatch.setenv("BREVO_API_KEY", "test-environment-key")
+    settings = Settings(
+        _env_file=None,
+        DATABASE_URL="sqlite:///./settings_test.db",
+        SECRET_KEY="test-secret-key-that-is-at-least-32-characters",
+        GEMINI_API_KEY="test",
+        FRONTEND_URL="http://localhost:5173",
+        API_HOST="localhost",
+        CLOUDINARY_CLOUD_NAME="",
+        CLOUDINARY_API_KEY="",
+        CLOUDINARY_API_SECRET="",
+    )
+    assert settings.BREVO_API_KEY == "test-environment-key"
+
+
 def test_brevo_success_sends_reset_email_over_https(monkeypatch, caplog):
     caplog.set_level(logging.INFO)
     configure_brevo(monkeypatch)
@@ -225,6 +243,25 @@ def test_brevo_success_sends_reset_email_over_https(monkeypatch, caplog):
     assert "owner@example.com" not in caplog.text
     assert "ai-menu-software.vercel.app" not in caplog.text
     assert "test-brevo-api-key" not in caplog.text
+
+
+def test_brevo_request_trims_whitespace_from_configured_key(monkeypatch):
+    configure_brevo(monkeypatch)
+    monkeypatch.setattr(auth_routes.settings, "BREVO_API_KEY", "  test-brevo-api-key\n")
+
+    class FakeResponse:
+        status = 201
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+
+    def fake_urlopen(request, timeout):
+        assert request.get_header("Api-key") == "test-brevo-api-key"
+        return FakeResponse()
+
+    monkeypatch.setattr(auth_routes.urllib.request, "urlopen", fake_urlopen)
+    auth_routes._send_password_reset_email("owner@example.com", "private-reset-token")
 
 
 def test_brevo_authentication_failure_logs_sanitized_response(monkeypatch, caplog):

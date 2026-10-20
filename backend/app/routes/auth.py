@@ -111,7 +111,7 @@ def _send_password_reset_email(email: str, token: str) -> None:
         "https://api.brevo.com/v3/smtp/email",
         data=payload,
         headers={
-            "api-key": settings.BREVO_API_KEY,
+            "api-key": settings.BREVO_API_KEY.strip(),
             "accept": "application/json",
             "Content-Type": "application/json",
         },
