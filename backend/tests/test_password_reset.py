@@ -11,8 +11,10 @@ os.environ.setdefault("CLOUDINARY_API_SECRET", "")
 
 from datetime import datetime, timedelta, timezone
 import hashlib
+import io
+import json
 import logging
-import smtplib
+import urllib.error
 
 import pytest
 from fastapi.testclient import TestClient
@@ -143,117 +145,107 @@ def test_forgot_password_provider_failure_keeps_generic_response(client, monkeyp
     db.close()
 
 
-def test_smtp_success_uses_starttls_and_sends_reset_message(monkeypatch, caplog):
-    caplog.set_level(logging.INFO)
-    monkeypatch.setattr(auth_routes.settings, "SMTP_HOST", "smtp.gmail.com")
-    monkeypatch.setattr(auth_routes.settings, "SMTP_PORT", 587)
-    monkeypatch.setattr(auth_routes.settings, "SMTP_USERNAME", "sender@example.com")
-    monkeypatch.setattr(auth_routes.settings, "SMTP_PASSWORD", "test-smtp-password")
+def configure_brevo(monkeypatch):
+    monkeypatch.setattr(auth_routes.settings, "BREVO_API_KEY", "test-brevo-api-key")
     monkeypatch.setattr(auth_routes.settings, "EMAIL_FROM", "Smart Menu <sender@example.com>")
     monkeypatch.setattr(auth_routes.settings, "FRONTEND_URL", "https://ai-menu-software.vercel.app")
-    captured = {}
 
-    class FakeSMTP:
-        def __init__(self, host, port, timeout):
-            captured.update(host=host, port=port, timeout=timeout)
+
+def test_brevo_success_sends_reset_email_over_https(monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    configure_brevo(monkeypatch)
+    captured = {"status": 201}
+
+    class FakeResponse:
+        status = captured["status"]
         def __enter__(self):
             return self
         def __exit__(self, *args):
             return False
-        def ehlo(self):
-            captured["ehlo"] = True
-        def starttls(self, context):
-            captured["starttls_context"] = context
-        def login(self, username, password):
-            captured["login"] = (username, password)
-        def send_message(self, message):
-            captured["message"] = message
+        def read(self):
+            return b'{"messageId":"provider-id"}'
 
-    monkeypatch.setattr(auth_routes.smtplib, "SMTP", FakeSMTP)
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(auth_routes.urllib.request, "urlopen", fake_urlopen)
     auth_routes._send_password_reset_email("owner@example.com", "private-reset-token")
-    assert captured["host"] == "smtp.gmail.com"
-    assert captured["port"] == 587
-    assert captured["starttls_context"] is not None
-    assert captured["login"] == ("sender@example.com", "test-smtp-password")
-    sent = captured["message"]
-    assert sent["To"] == "owner@example.com"
-    assert "https://ai-menu-software.vercel.app/reset-password?token=private-reset-token" in sent.get_body(preferencelist=("plain",)).get_content()
-    assert "Reset password" in sent.get_body(preferencelist=("html",)).get_content()
-    assert "accepted by SMTP server" in caplog.text
+    request = captured["request"]
+    body = json.loads(request.data.decode("utf-8"))
+    assert request.full_url == "https://api.brevo.com/v3/smtp/email"
+    assert request.get_method() == "POST"
+    assert request.get_header("Api-key") == "test-brevo-api-key"
+    assert request.get_header("Content-type") == "application/json"
+    assert body["sender"] == {"name": "Smart Menu", "email": "sender@example.com"}
+    assert body["to"] == [{"email": "owner@example.com"}]
+    assert "https://ai-menu-software.vercel.app/reset-password?token=private-reset-token" in body["textContent"]
+    assert "Reset password" in body["htmlContent"]
+    assert "accepted by provider=brevo http_status=201" in caplog.text
     assert "private-reset-token" not in caplog.text
     assert "owner@example.com" not in caplog.text
     assert "ai-menu-software.vercel.app" not in caplog.text
-    assert "test-smtp-password" not in caplog.text
+    assert "test-brevo-api-key" not in caplog.text
 
 
-def test_smtp_auth_failure_logs_status_without_credentials(monkeypatch, caplog):
-    monkeypatch.setattr(auth_routes.settings, "SMTP_USERNAME", "sender@example.com")
-    monkeypatch.setattr(auth_routes.settings, "SMTP_PASSWORD", "test-smtp-password")
-    monkeypatch.setattr(auth_routes.settings, "EMAIL_FROM", "Smart Menu <sender@example.com>")
+def test_brevo_authentication_failure_logs_sanitized_response(monkeypatch, caplog):
+    configure_brevo(monkeypatch)
+    body = json.dumps({"code": "unauthorized", "message": "Invalid API key test-brevo-api-key"}).encode()
 
-    class RejectingSMTP:
-        def __init__(self, *args, **kwargs):
-            pass
-        def __enter__(self):
-            return self
-        def __exit__(self, *args):
-            return False
-        def ehlo(self):
-            pass
-        def starttls(self, context):
-            pass
-        def login(self, username, password):
-            raise smtplib.SMTPAuthenticationError(535, b"Authentication failed for sender@example.com")
+    def reject(request, timeout):
+        raise urllib.error.HTTPError(request.full_url, 401, "Unauthorized", {}, io.BytesIO(body))
 
-    monkeypatch.setattr(auth_routes.smtplib, "SMTP", RejectingSMTP)
+    monkeypatch.setattr(auth_routes.urllib.request, "urlopen", reject)
     with pytest.raises(RuntimeError):
         auth_routes._send_password_reset_email("owner@example.com", "private-reset-token")
-    assert "smtp_status=535" in caplog.text
+    assert "provider=brevo http_status=401" in caplog.text
+    assert "error_code=unauthorized" in caplog.text
     assert "owner@example.com" not in caplog.text
     assert "sender@example.com" not in caplog.text
     assert "private-reset-token" not in caplog.text
-    assert "test-smtp-password" not in caplog.text
+    assert "test-brevo-api-key" not in caplog.text
 
 
-def test_smtp_recipient_rejection_is_not_logged_as_success(monkeypatch, caplog):
-    monkeypatch.setattr(auth_routes.settings, "SMTP_USERNAME", "sender@example.com")
-    monkeypatch.setattr(auth_routes.settings, "SMTP_PASSWORD", "test-smtp-password")
-    monkeypatch.setattr(auth_routes.settings, "EMAIL_FROM", "Smart Menu <sender@example.com>")
+def test_brevo_network_error_is_logged_without_exception_details(monkeypatch, caplog):
+    configure_brevo(monkeypatch)
 
-    class RejectingSMTP:
-        def __init__(self, *args, **kwargs):
-            pass
-        def __enter__(self):
-            return self
-        def __exit__(self, *args):
-            return False
-        def ehlo(self):
-            pass
-        def starttls(self, context):
-            pass
-        def login(self, username, password):
-            pass
-        def send_message(self, message):
-            return {"owner@example.com": (550, b"recipient rejected")}
+    def fail_network(request, timeout):
+        raise urllib.error.URLError("failure for owner@example.com with token private-reset-token")
 
-    monkeypatch.setattr(auth_routes.smtplib, "SMTP", RejectingSMTP)
+    monkeypatch.setattr(auth_routes.urllib.request, "urlopen", fail_network)
     with pytest.raises(RuntimeError):
         auth_routes._send_password_reset_email("owner@example.com", "private-reset-token")
-    assert "SMTPRecipientsRefused" in caplog.text
-    assert "accepted by SMTP server" not in caplog.text
+    assert "provider=brevo error_type=URLError" in caplog.text
     assert "owner@example.com" not in caplog.text
     assert "private-reset-token" not in caplog.text
-    assert "test-smtp-password" not in caplog.text
+    assert "test-brevo-api-key" not in caplog.text
 
 
-def test_smtp_missing_configuration_logs_only_variable_name(monkeypatch, caplog):
-    monkeypatch.setattr(auth_routes.settings, "SMTP_USERNAME", "sender@example.com")
-    monkeypatch.setattr(auth_routes.settings, "SMTP_PASSWORD", None)
+def test_brevo_rejected_sender_logs_code_and_sanitized_message(monkeypatch, caplog):
+    configure_brevo(monkeypatch)
+    body = json.dumps({"code": "sender_not_found", "message": "Sender owner@example.com is not verified at https://provider.example/senders token=private-reset-token"}).encode()
+
+    def reject_sender(request, timeout):
+        raise urllib.error.HTTPError(request.full_url, 400, "Bad Request", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(auth_routes.urllib.request, "urlopen", reject_sender)
+    with pytest.raises(RuntimeError):
+        auth_routes._send_password_reset_email("owner@example.com", "private-reset-token")
+    assert "http_status=400" in caplog.text
+    assert "error_code=sender_not_found" in caplog.text
+    assert "Sender [redacted] is not verified at [url]" in caplog.text
+    assert "owner@example.com" not in caplog.text
+    assert "private-reset-token" not in caplog.text
+    assert "provider.example" not in caplog.text
+
+
+def test_brevo_missing_configuration_logs_only_variable_name(monkeypatch, caplog):
+    monkeypatch.setattr(auth_routes.settings, "BREVO_API_KEY", None)
     monkeypatch.setattr(auth_routes.settings, "EMAIL_FROM", "Smart Menu <sender@example.com>")
     with pytest.raises(RuntimeError, match="not configured"):
         auth_routes._send_password_reset_email("owner@example.com", "private-reset-token")
-    assert "variables=SMTP_PASSWORD" in caplog.text
-    assert "test-smtp-password" not in caplog.text
+    assert "variables=BREVO_API_KEY" in caplog.text
     assert "sender@example.com" not in caplog.text
     assert "owner@example.com" not in caplog.text
     assert "private-reset-token" not in caplog.text

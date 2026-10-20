@@ -1,12 +1,13 @@
 from datetime import datetime, timedelta, timezone
 import hashlib
 import secrets
+import json
 import logging
 import re
-import smtplib
-import ssl
+import urllib.error
+import urllib.request
+import html
 from email.utils import parseaddr
-from email.message import EmailMessage
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -34,9 +35,14 @@ router = APIRouter(
 logger = logging.getLogger(__name__)
 
 
-def _safe_smtp_message(value: object) -> str:
-    """Keep SMTP diagnostics useful without copying addresses, URLs, or tokens."""
+def _safe_brevo_message(value: object, sensitive_values: tuple[str, ...] = ()) -> str:
+    """Keep provider diagnostics useful without copying addresses, URLs, or tokens."""
     message = str(value or "")
+    for sensitive_value in sensitive_values:
+        if sensitive_value:
+            message = message.replace(sensitive_value, "[redacted]")
+    if settings.BREVO_API_KEY:
+        message = message.replace(settings.BREVO_API_KEY, "[redacted]")
     message = re.sub(r"https?://\S+", "[url]", message, flags=re.IGNORECASE)
     message = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[email]", message)
     message = re.sub(
@@ -49,10 +55,22 @@ def _safe_smtp_message(value: object) -> str:
     return message[:300]
 
 
+def _brevo_error_details(body: bytes, sensitive_values: tuple[str, ...] = ()) -> tuple[str | None, str | None]:
+    try:
+        parsed = json.loads(body.decode("utf-8", errors="replace"))
+    except (ValueError, UnicodeError):
+        return None, _safe_brevo_message(body.decode("utf-8", errors="replace"), sensitive_values)
+    if not isinstance(parsed, dict):
+        return None, _safe_brevo_message(parsed, sensitive_values)
+    code = parsed.get("code") or parsed.get("errorCode")
+    message = parsed.get("message") or parsed.get("error")
+    safe_code = re.sub(r"[^A-Za-z0-9_.-]", "", _safe_brevo_message(code, sensitive_values))[:80] if code else None
+    return safe_code, _safe_brevo_message(message, sensitive_values) if message else None
+
+
 def _send_password_reset_email(email: str, token: str) -> None:
     missing = [name for name, value in (
-        ("SMTP_USERNAME", settings.SMTP_USERNAME),
-        ("SMTP_PASSWORD", settings.SMTP_PASSWORD),
+        ("BREVO_API_KEY", settings.BREVO_API_KEY),
         ("FRONTEND_URL", settings.FRONTEND_URL),
         ("EMAIL_FROM", settings.EMAIL_FROM),
     ) if not value or not str(value).strip()]
@@ -64,38 +82,51 @@ def _send_password_reset_email(email: str, token: str) -> None:
         logger.error("Password reset email sender configuration is invalid variable=EMAIL_FROM")
         raise RuntimeError("Password reset email sender is invalid")
     reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?token={token}"
-    message = EmailMessage()
-    message["From"] = settings.EMAIL_FROM
-    message["To"] = email
-    message["Subject"] = "Reset your Smart Menu password"
-    message.set_content(
-        f"Use this link to reset your Smart Menu password. It expires in "
-        f"{settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES} minutes:\n\n{reset_url}\n\n"
-        "If you did not request this, you can ignore this email."
+    sender_name, _ = parseaddr(settings.EMAIL_FROM)
+    sender = {"email": sender_address}
+    if sender_name:
+        sender["name"] = sender_name
+    payload = json.dumps({
+        "sender": sender,
+        "to": [{"email": email}],
+        "subject": "Reset your Smart Menu password",
+        "textContent": (
+            f"Use this link to reset your Smart Menu password. It expires in "
+            f"{settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES} minutes:\n\n{reset_url}\n\n"
+            "If you did not request this, you can ignore this email."
+        ),
+        "htmlContent": (
+            f'<p>Use this link to reset your Smart Menu password. It expires in '
+            f'{settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES} minutes.</p>'
+            f'<p><a href="{html.escape(reset_url, quote=True)}">Reset password</a></p>'
+            '<p>If you did not request this, you can ignore this email.</p>'
+        ),
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.brevo.com/v3/smtp/email",
+        data=payload,
+        headers={
+            "api-key": settings.BREVO_API_KEY,
+            "accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        method="POST",
     )
-    message.add_alternative(
-        f'<p>Use this link to reset your Smart Menu password. It expires in '
-        f'{settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES} minutes.</p>'
-        f'<p><a href="{reset_url}">Reset password</a></p>'
-        '<p>If you did not request this, you can ignore this email.</p>',
-        subtype="html",
-    )
+    sensitive_values = (email, token, reset_url, sender_address)
     try:
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as smtp:
-            smtp.ehlo()
-            smtp.starttls(context=ssl.create_default_context())
-            smtp.ehlo()
-            smtp.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
-            refused = smtp.send_message(message)
-            if refused:
-                raise smtplib.SMTPRecipientsRefused(refused)
-        logger.info("Password reset email accepted by SMTP server")
-    except smtplib.SMTPResponseException as exc:
-        detail = _safe_smtp_message(exc.smtp_error.decode("utf-8", errors="replace") if isinstance(exc.smtp_error, bytes) else exc.smtp_error)
-        logger.error("Password reset email SMTP request failed smtp_status=%s error_message=%s", exc.smtp_code, detail or "unavailable")
-        raise RuntimeError("Could not send password reset email") from exc
-    except (smtplib.SMTPException, OSError, TimeoutError) as exc:
-        logger.error("Password reset email SMTP request failed error_type=%s", type(exc).__name__)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status >= 300:
+                body = response.read()
+                code, message = _brevo_error_details(body, sensitive_values)
+                logger.error("Password reset email provider rejected request provider=brevo http_status=%s error_code=%s error_message=%s", response.status, code or "unknown", message or "unavailable")
+                raise RuntimeError("Email provider rejected the message")
+            logger.info("Password reset email accepted by provider=brevo http_status=%s", response.status)
+    except urllib.error.HTTPError as exc:
+        code, message = _brevo_error_details(exc.read(), sensitive_values)
+        logger.error("Password reset email provider rejected request provider=brevo http_status=%s error_code=%s error_message=%s", exc.code, code or "unknown", message or "unavailable")
+        raise RuntimeError("Email provider rejected the message") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        logger.error("Password reset email provider request failed provider=brevo error_type=%s", type(exc).__name__)
         raise RuntimeError("Could not send password reset email") from exc
 
 

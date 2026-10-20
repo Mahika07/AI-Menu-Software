@@ -11,10 +11,7 @@ class Settings(BaseSettings):
 
     FRONTEND_URL: str
     API_HOST: str
-    SMTP_HOST: str = "smtp.gmail.com"
-    SMTP_PORT: int = 587
-    SMTP_USERNAME: str | None = None
-    SMTP_PASSWORD: str | None = None
+    BREVO_API_KEY: str | None = None
     EMAIL_FROM: str | None = None
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 30
     ENVIRONMENT: str = "development"
