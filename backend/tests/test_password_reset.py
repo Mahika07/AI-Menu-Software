@@ -29,6 +29,8 @@ from app.main import app
 from app.models import User, PasswordResetToken
 from app.routes import auth as auth_routes
 
+_real_send_password_reset_email = auth_routes._send_password_reset_email
+
 
 @pytest.fixture
 def client(monkeypatch):
@@ -118,13 +120,24 @@ def test_token_cannot_be_reused(client):
     assert second.status_code == 400
 
 
-def test_forgot_password_response_does_not_reveal_account(client):
+def test_forgot_password_response_does_not_reveal_account(client, monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
     http, sessions = client
+    monkeypatch.setattr(auth_routes.settings, "BREVO_API_KEY", "configured-test-key")
+    monkeypatch.setattr(auth_routes.settings, "EMAIL_FROM", "Smart Menu <sender@example.com>")
     make_user(sessions)
     unknown = http.post("/auth/forgot-password", json={"email": "unknown@example.com"})
     known = http.post("/auth/forgot-password", json={"email": "owner@example.com"})
     assert unknown.status_code == known.status_code == 200
     assert unknown.json() == known.json()
+    assert "event=forgot_password_request_received" in caplog.text
+    assert "event=forgot_password_account_lookup found=False" in caplog.text
+    assert "event=forgot_password_account_lookup found=True" in caplog.text
+    assert "brevo_api_key_configured=True email_from_configured=True" in caplog.text
+    assert "event=brevo_request_attempted result=false reason=account_not_found" in caplog.text
+    assert "unknown@example.com" not in caplog.text
+    assert "owner@example.com" not in caplog.text
+    assert "configured-test-key" not in caplog.text
 
 
 def test_forgot_password_provider_failure_keeps_generic_response(client, monkeypatch, caplog):
@@ -138,10 +151,35 @@ def test_forgot_password_provider_failure_keeps_generic_response(client, monkeyp
     response = http.post("/auth/forgot-password", json={"email": "owner@example.com"})
     assert response.status_code == 200
     assert response.json() == {"message": "If an account exists for that email, a password reset link has been sent."}
-    assert "was not accepted" in caplog.text
+    assert "event=forgot_password_token_cleanup result=deleted" in caplog.text
     assert "owner@example.com" not in caplog.text
     db = sessions()
     assert db.query(PasswordResetToken).count() == 0
+    db.close()
+
+
+def test_forgot_password_missing_brevo_config_keeps_generic_response_and_cleans_token(client, monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    http, sessions = client
+    user_id = make_user(sessions)
+    monkeypatch.setattr(auth_routes.settings, "BREVO_API_KEY", None)
+    monkeypatch.setattr(auth_routes.settings, "EMAIL_FROM", "Smart Menu <sender@example.com>")
+    monkeypatch.setattr(auth_routes, "_send_password_reset_email", _real_send_password_reset_email)
+    monkeypatch.setattr(
+        auth_routes.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: pytest.fail("Brevo request must not run without its API key"),
+    )
+
+    response = http.post("/auth/forgot-password", json={"email": "owner@example.com"})
+    assert response.status_code == 200
+    assert response.json() == {"message": "If an account exists for that email, a password reset link has been sent."}
+    assert "event=forgot_password_account_lookup found=True" in caplog.text
+    assert "brevo_api_key_configured=False email_from_configured=True" in caplog.text
+    assert "event=brevo_request_attempted result=false reason=missing_configuration" in caplog.text
+    assert "event=forgot_password_token_cleanup result=deleted" in caplog.text
+    db = sessions()
+    assert db.query(PasswordResetToken).filter(PasswordResetToken.user_id == user_id).count() == 0
     db.close()
 
 
@@ -182,7 +220,7 @@ def test_brevo_success_sends_reset_email_over_https(monkeypatch, caplog):
     assert body["to"] == [{"email": "owner@example.com"}]
     assert "https://ai-menu-software.vercel.app/reset-password?token=private-reset-token" in body["textContent"]
     assert "Reset password" in body["htmlContent"]
-    assert "accepted by provider=brevo http_status=201" in caplog.text
+    assert "event=brevo_request_accepted http_status=201" in caplog.text
     assert "private-reset-token" not in caplog.text
     assert "owner@example.com" not in caplog.text
     assert "ai-menu-software.vercel.app" not in caplog.text
@@ -190,6 +228,7 @@ def test_brevo_success_sends_reset_email_over_https(monkeypatch, caplog):
 
 
 def test_brevo_authentication_failure_logs_sanitized_response(monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
     configure_brevo(monkeypatch)
     body = json.dumps({"code": "unauthorized", "message": "Invalid API key test-brevo-api-key"}).encode()
 
@@ -199,7 +238,8 @@ def test_brevo_authentication_failure_logs_sanitized_response(monkeypatch, caplo
     monkeypatch.setattr(auth_routes.urllib.request, "urlopen", reject)
     with pytest.raises(RuntimeError):
         auth_routes._send_password_reset_email("owner@example.com", "private-reset-token")
-    assert "provider=brevo http_status=401" in caplog.text
+    assert "event=brevo_request_attempted result=true" in caplog.text
+    assert "event=brevo_request_rejected http_status=401" in caplog.text
     assert "error_code=unauthorized" in caplog.text
     assert "owner@example.com" not in caplog.text
     assert "sender@example.com" not in caplog.text
@@ -208,6 +248,7 @@ def test_brevo_authentication_failure_logs_sanitized_response(monkeypatch, caplo
 
 
 def test_brevo_network_error_is_logged_without_exception_details(monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
     configure_brevo(monkeypatch)
 
     def fail_network(request, timeout):
@@ -216,13 +257,16 @@ def test_brevo_network_error_is_logged_without_exception_details(monkeypatch, ca
     monkeypatch.setattr(auth_routes.urllib.request, "urlopen", fail_network)
     with pytest.raises(RuntimeError):
         auth_routes._send_password_reset_email("owner@example.com", "private-reset-token")
-    assert "provider=brevo error_type=URLError" in caplog.text
+    assert "event=brevo_request_attempted result=true" in caplog.text
+    assert "event=brevo_network_error error_type=URLError" in caplog.text
+    assert "error_message=" in caplog.text
     assert "owner@example.com" not in caplog.text
     assert "private-reset-token" not in caplog.text
     assert "test-brevo-api-key" not in caplog.text
 
 
 def test_brevo_rejected_sender_logs_code_and_sanitized_message(monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
     configure_brevo(monkeypatch)
     body = json.dumps({"code": "sender_not_found", "message": "Sender owner@example.com is not verified at https://provider.example/senders token=private-reset-token"}).encode()
 
@@ -245,7 +289,8 @@ def test_brevo_missing_configuration_logs_only_variable_name(monkeypatch, caplog
     monkeypatch.setattr(auth_routes.settings, "EMAIL_FROM", "Smart Menu <sender@example.com>")
     with pytest.raises(RuntimeError, match="not configured"):
         auth_routes._send_password_reset_email("owner@example.com", "private-reset-token")
-    assert "variables=BREVO_API_KEY" in caplog.text
+    assert "event=brevo_request_attempted result=false reason=missing_configuration" in caplog.text
+    assert "brevo_api_key_configured=False email_from_configured=True" in caplog.text
     assert "sender@example.com" not in caplog.text
     assert "owner@example.com" not in caplog.text
     assert "private-reset-token" not in caplog.text

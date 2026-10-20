@@ -75,11 +75,16 @@ def _send_password_reset_email(email: str, token: str) -> None:
         ("EMAIL_FROM", settings.EMAIL_FROM),
     ) if not value or not str(value).strip()]
     if missing:
-        logger.error("Password reset email configuration missing variables=%s", ",".join(missing))
+        logger.error(
+            "event=brevo_request_attempted result=false reason=missing_configuration "
+            "brevo_api_key_configured=%s email_from_configured=%s",
+            bool(settings.BREVO_API_KEY and settings.BREVO_API_KEY.strip()),
+            bool(settings.EMAIL_FROM and settings.EMAIL_FROM.strip()),
+        )
         raise RuntimeError("Password reset email is not configured")
     sender_address = parseaddr(settings.EMAIL_FROM)[1]
     if not sender_address or "@" not in sender_address:
-        logger.error("Password reset email sender configuration is invalid variable=EMAIL_FROM")
+        logger.error("event=brevo_request_attempted result=false reason=invalid_sender_configuration")
         raise RuntimeError("Password reset email sender is invalid")
     reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?token={token}"
     sender_name, _ = parseaddr(settings.EMAIL_FROM)
@@ -114,27 +119,42 @@ def _send_password_reset_email(email: str, token: str) -> None:
     )
     sensitive_values = (email, token, reset_url, sender_address)
     try:
+        logger.info("event=brevo_request_attempted result=true")
         with urllib.request.urlopen(req, timeout=10) as response:
             if response.status >= 300:
                 body = response.read()
                 code, message = _brevo_error_details(body, sensitive_values)
-                logger.error("Password reset email provider rejected request provider=brevo http_status=%s error_code=%s error_message=%s", response.status, code or "unknown", message or "unavailable")
+                logger.error("event=brevo_request_rejected http_status=%s error_code=%s error_message=%s", response.status, code or "unknown", message or "unavailable")
                 raise RuntimeError("Email provider rejected the message")
-            logger.info("Password reset email accepted by provider=brevo http_status=%s", response.status)
+            logger.info("event=brevo_request_accepted http_status=%s", response.status)
     except urllib.error.HTTPError as exc:
         code, message = _brevo_error_details(exc.read(), sensitive_values)
-        logger.error("Password reset email provider rejected request provider=brevo http_status=%s error_code=%s error_message=%s", exc.code, code or "unknown", message or "unavailable")
+        logger.error("event=brevo_request_rejected http_status=%s error_code=%s error_message=%s", exc.code, code or "unknown", message or "unavailable")
         raise RuntimeError("Email provider rejected the message") from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        logger.error("Password reset email provider request failed provider=brevo error_type=%s", type(exc).__name__)
+        logger.error(
+            "event=brevo_network_error error_type=%s error_message=%s",
+            type(exc).__name__,
+            _safe_brevo_message(exc, sensitive_values) or "unavailable",
+        )
         raise RuntimeError("Could not send password reset email") from exc
 
 
 @router.post("/forgot-password")
 @limiter.limit("5/minute")
 def forgot_password(request: Request, data: PasswordResetRequest, db: Session = Depends(get_db)):
+    logger.info("event=forgot_password_request_received")
     email = str(data.email).strip().lower()
     user = db.query(User).filter(User.email == email, User.is_active.is_(True)).first()
+    logger.info(
+        "event=forgot_password_account_lookup found=%s",
+        bool(user),
+    )
+    logger.info(
+        "event=forgot_password_email_configuration brevo_api_key_configured=%s email_from_configured=%s",
+        bool(settings.BREVO_API_KEY and settings.BREVO_API_KEY.strip()),
+        bool(settings.EMAIL_FROM and settings.EMAIL_FROM.strip()),
+    )
     if user:
         raw_token = secrets.token_urlsafe(32)
         now = datetime.now(timezone.utc)
@@ -153,7 +173,9 @@ def forgot_password(request: Request, data: PasswordResetRequest, db: Session = 
             db.delete(record)
             db.commit()
             # Keep the response generic; details were logged by the sender.
-            logger.error("Password reset email was not accepted; reset token record removed")
+            logger.error("event=forgot_password_token_cleanup result=deleted")
+    else:
+        logger.info("event=brevo_request_attempted result=false reason=account_not_found")
     return {"message": "If an account exists for that email, a password reset link has been sent."}
 
 
