@@ -63,6 +63,7 @@ def create_pos_order(
 
     table = None
 
+    
     if payload.table_id is not None:
         table = (
             db.query(RestaurantTable)
@@ -71,6 +72,7 @@ def create_pos_order(
                 RestaurantTable.branch_id == branch.id,
                 RestaurantTable.is_active.is_(True),
             )
+            .with_for_update()
             .first()
         )
 
@@ -78,6 +80,25 @@ def create_pos_order(
             raise HTTPException(
                 status_code=422,
                 detail="The selected table is unavailable.",
+            )
+
+        active_order = (
+            db.query(Order.id)
+            .filter(
+                Order.branch_id == branch.id,
+                Order.table_id == table.id,
+                Order.status.notin_({"completed", "cancelled"}),
+            )
+            .first()
+        )
+
+        if active_order is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Table {table.table_number} already has an active order. "
+                    "Complete or cancel that order before creating another."
+                ),
             )
 
     requested_ids = [item.dish_id for item in payload.items]

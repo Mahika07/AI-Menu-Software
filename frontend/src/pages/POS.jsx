@@ -41,7 +41,7 @@ export default function POS() {
 
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState(
-    localStorage.getItem("selected_branch_id") || ""
+    localStorage.getItem("selected_branch_id") || "",
   );
 
   const [dishes, setDishes] = useState([]);
@@ -85,8 +85,8 @@ export default function POS() {
                 ...branch,
                 restaurant_name: restaurant.name,
               }));
-            }
-          )
+            },
+          ),
         );
 
         const allBranches = groups.flat();
@@ -97,9 +97,7 @@ export default function POS() {
 
         const saved = localStorage.getItem("selected_branch_id") || "";
 
-        const initial = allBranches.some(
-          (item) => String(item.id) === saved
-        )
+        const initial = allBranches.some((item) => String(item.id) === saved)
           ? saved
           : String(allBranches[0]?.id || "");
 
@@ -112,7 +110,7 @@ export default function POS() {
         if (!cancelled) {
           setError(
             err.response?.data?.detail ||
-              "Could not load your restaurant branches."
+              "Could not load your restaurant branches.",
           );
         }
       }
@@ -140,20 +138,17 @@ export default function POS() {
     setError("");
 
     try {
-      const [dishRows, categoryRows, tableRows, orderRows] =
-        await Promise.all([
-          getDishes(branchId),
-          getCategories(branchId),
-          getTables(branchId),
-          getBranchOrders(branchId),
-        ]);
+      const [dishRows, categoryRows, tableRows, orderRows] = await Promise.all([
+        getDishes(branchId),
+        getCategories(branchId),
+        getTables(branchId),
+        getBranchOrders(branchId),
+      ]);
 
-      const safeCategories = Array.isArray(categoryRows)
-        ? categoryRows
-        : [];
+      const safeCategories = Array.isArray(categoryRows) ? categoryRows : [];
 
       const categoryNames = new Map(
-        safeCategories.map((item) => [item.id, item.name])
+        safeCategories.map((item) => [item.id, item.name]),
       );
 
       setMenuCategories(safeCategories);
@@ -161,29 +156,41 @@ export default function POS() {
       setDishes(
         (Array.isArray(dishRows) ? dishRows : []).map((dish) => ({
           ...dish,
-          category_name:
-            categoryNames.get(dish.category_id) || "",
-        }))
+          category_name: categoryNames.get(dish.category_id) || "",
+        })),
       );
 
       setTables(
         (Array.isArray(tableRows) ? tableRows : []).filter(
-          (table) => table.is_active !== false
-        )
+          (table) => table.is_active !== false,
+        ),
       );
 
-      setOrders(
-        (Array.isArray(orderRows) ? orderRows : []).slice(0, 6)
-      );
+      setOrders((Array.isArray(orderRows) ? orderRows : []).slice(0, 6));
     } catch (err) {
       setError(
         err.response?.data?.detail ||
-          "Could not load the POS menu. Please refresh and try again."
+          "Could not load the POS menu. Please refresh and try again.",
       );
     } finally {
       setLoading(false);
     }
   }, [branchId]);
+
+  useEffect(() => {
+    if (!tableId) return;
+
+    const selectedTable = tables.find(
+      (table) => String(table.id) === String(tableId),
+    );
+
+    if (selectedTable?.is_occupied === true) {
+      setTableId("");
+      setError(
+        "The selected table is now occupied. Please choose another table or takeaway.",
+      );
+    }
+  }, [tableId, tables]);
 
   useEffect(() => {
     refreshBranchData();
@@ -195,7 +202,7 @@ export default function POS() {
         .filter((item) => item.is_active !== false)
         .map((item) => item.name)
         .sort((a, b) => a.localeCompare(b)),
-    [menuCategories]
+    [menuCategories],
   );
 
   const filteredDishes = useMemo(
@@ -203,11 +210,9 @@ export default function POS() {
       dishes.filter((dish) => {
         if (dish.is_available === false) return false;
 
-        const dishCategory =
-          dish.category?.name || dish.category_name || "";
+        const dishCategory = dish.category?.name || dish.category_name || "";
 
-        const matchesCategory =
-          category === "all" || dishCategory === category;
+        const matchesCategory = category === "all" || dishCategory === category;
 
         const term = search.trim().toLowerCase();
 
@@ -220,49 +225,37 @@ export default function POS() {
             dish.category?.name,
             dish.category_name,
           ].some((value) =>
-            String(value || "").toLowerCase().includes(term)
+            String(value || "")
+              .toLowerCase()
+              .includes(term),
           );
 
         return matchesCategory && matchesSearch;
       }),
-    [dishes, category, search]
+    [dishes, category, search],
   );
 
   const subtotal = useMemo(
     () =>
       toAmount(
-        cart.reduce(
-          (sum, item) =>
-            sum + Number(item.price) * item.quantity,
-          0
-        )
+        cart.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0),
       ),
-    [cart]
+    [cart],
   );
 
-  const discountAmount = Math.min(
-    subtotal,
-    Math.max(0, Number(discount) || 0)
-  );
+  const discountAmount = Math.min(subtotal, Math.max(0, Number(discount) || 0));
 
-  const taxableAmount = Math.max(
-    0,
-    subtotal - discountAmount
-  );
+  const taxableAmount = Math.max(0, subtotal - discountAmount);
 
   const taxAmount = toAmount(
-    (taxableAmount *
-      Math.min(100, Math.max(0, Number(taxRate) || 0))) /
-      100
+    (taxableAmount * Math.min(100, Math.max(0, Number(taxRate) || 0))) / 100,
   );
 
   const total = toAmount(taxableAmount + taxAmount);
 
   function addDish(dish) {
     setCart((current) => {
-      const existing = current.find(
-        (item) => item.id === dish.id
-      );
+      const existing = current.find((item) => item.id === dish.id);
 
       if (existing) {
         return current.map((item) =>
@@ -271,7 +264,7 @@ export default function POS() {
                 ...item,
                 quantity: Math.min(20, item.quantity + 1),
               }
-            : item
+            : item,
         );
       }
 
@@ -299,9 +292,9 @@ export default function POS() {
                 ...item,
                 quantity: item.quantity + amount,
               }
-            : item
+            : item,
         )
-        .filter((item) => item.quantity > 0)
+        .filter((item) => item.quantity > 0),
     );
   }
 
@@ -340,8 +333,8 @@ export default function POS() {
       collectPayment &&
       !window.confirm(
         `Confirm that you have actually received ${money(
-          total
-        )} by ${paymentMethod.toUpperCase()}?`
+          total,
+        )} by ${paymentMethod.toUpperCase()}?`,
       )
     ) {
       return;
@@ -366,21 +359,13 @@ export default function POS() {
         })),
       });
 
-      createdBill = await createBill(
-        branchId,
-        createdOrder.id,
-        {
-          discount_amount: Number(discount).toFixed(2),
-          tax_rate: Number(taxRate).toFixed(2),
-        }
-      );
+      createdBill = await createBill(branchId, createdOrder.id, {
+        discount_amount: Number(discount).toFixed(2),
+        tax_rate: Number(taxRate).toFixed(2),
+      });
 
       if (collectPayment) {
-        await markBillPaid(
-          branchId,
-          createdBill.id,
-          paymentMethod
-        );
+        await markBillPaid(branchId, createdBill.id, paymentMethod);
       }
 
       setCart([]);
@@ -394,7 +379,7 @@ export default function POS() {
       setNotice(
         collectPayment
           ? "Order created, bill generated, and staff-confirmed payment recorded."
-          : "Order created and bill generated successfully."
+          : "Order created and bill generated successfully.",
       );
 
       await refreshBranchData();
@@ -429,11 +414,11 @@ export default function POS() {
         setError(
           `Order ${
             createdOrder.order_number || `#${createdOrder.id}`
-          } was created, but bill creation failed. Check Bills & Receipts before retrying. Details: ${detail}`
+          } was created, but bill creation failed. Check Bills & Receipts before retrying. Details: ${detail}`,
         );
       } else if (createdBill) {
         setError(
-          `Bill ${createdBill.bill_number || createdBill.id} was created, but a later step failed. Check the bill's payment status before retrying. Details: ${detail}`
+          `Bill ${createdBill.bill_number || createdBill.id} was created, but a later step failed. Check the bill's payment status before retrying. Details: ${detail}`,
         );
       } else {
         setError(detail);
@@ -452,8 +437,8 @@ export default function POS() {
           <p className="pos-eyebrow">RESTAURANT OPERATIONS</p>
           <h1>Point of Sale</h1>
           <p className="pos-subtitle">
-            Create dine-in or takeaway orders, generate bills,
-            and record received payments.
+            Create dine-in or takeaway orders, generate bills, and record
+            received payments.
           </p>
         </div>
 
@@ -467,10 +452,7 @@ export default function POS() {
               setBranchId(value);
 
               if (value) {
-                localStorage.setItem(
-                  "selected_branch_id",
-                  value
-                );
+                localStorage.setItem("selected_branch_id", value);
               }
 
               setCart([]);
@@ -482,10 +464,7 @@ export default function POS() {
             <option value="">Select a branch</option>
 
             {branches.map((branch) => (
-              <option
-                key={branch.id}
-                value={String(branch.id)}
-              >
+              <option key={branch.id} value={String(branch.id)}>
                 {branch.restaurant_name} · {branch.name}
               </option>
             ))}
@@ -494,20 +473,14 @@ export default function POS() {
       </header>
 
       {error && (
-        <div
-          className="pos-alert pos-alert-error"
-          role="alert"
-        >
+        <div className="pos-alert pos-alert-error" role="alert">
           <AlertCircle size={18} />
           <span>{error}</span>
         </div>
       )}
 
       {notice && (
-        <div
-          className="pos-alert pos-alert-success"
-          role="status"
-        >
+        <div className="pos-alert pos-alert-success" role="status">
           <CheckCircle2 size={18} />
           <span>{notice}</span>
         </div>
@@ -517,9 +490,7 @@ export default function POS() {
         <section className="pos-empty">
           <Utensils size={32} />
           <h2>No branch available</h2>
-          <p>
-            Create a restaurant and branch before using the POS.
-          </p>
+          <p>Create a restaurant and branch before using the POS.</p>
         </section>
       )}
 
@@ -544,9 +515,7 @@ export default function POS() {
               aria-label="Search dishes"
               placeholder="Search dishes or ingredients…"
               value={search}
-              onChange={(event) =>
-                setSearch(event.target.value)
-              }
+              onChange={(event) => setSearch(event.target.value)}
             />
           </div>
 
@@ -563,9 +532,7 @@ export default function POS() {
               <button
                 key={name}
                 type="button"
-                className={
-                  category === name ? "active" : ""
-                }
+                className={category === name ? "active" : ""}
                 onClick={() => setCategory(name)}
               >
                 {name}
@@ -574,9 +541,7 @@ export default function POS() {
           </div>
 
           {loading ? (
-            <div className="pos-loading">
-              Loading menu…
-            </div>
+            <div className="pos-loading">Loading menu…</div>
           ) : !filteredDishes.length ? (
             <div className="pos-empty-inline">
               No available dishes match your search.
@@ -591,11 +556,7 @@ export default function POS() {
                   onClick={() => addDish(dish)}
                 >
                   {dish.image_url ? (
-                    <img
-                      src={dish.image_url}
-                      alt=""
-                      loading="lazy"
-                    />
+                    <img src={dish.image_url} alt="" loading="lazy" />
                   ) : (
                     <div className="pos-dish-placeholder">
                       <Utensils size={26} />
@@ -605,9 +566,7 @@ export default function POS() {
                   <span className="pos-dish-card-body">
                     <strong>{dish.name}</strong>
                     <span>
-                      {dish.category?.name ||
-                        dish.category_name ||
-                        "Menu item"}
+                      {dish.category?.name || dish.category_name || "Menu item"}
                     </span>
                     <b>{money(dish.price)}</b>
                   </span>
@@ -625,13 +584,7 @@ export default function POS() {
           <div className="pos-panel-heading">
             <div>
               <h2>Current order</h2>
-              <p>
-                {cart.reduce(
-                  (sum, item) => sum + item.quantity,
-                  0
-                )}{" "}
-                items
-              </p>
+              <p>{cart.reduce((sum, item) => sum + item.quantity, 0)} items</p>
             </div>
 
             <span className="pos-cart-icon">
@@ -646,20 +599,20 @@ export default function POS() {
               <span className="pos-select-wrap">
                 <select
                   value={tableId}
-                  onChange={(event) =>
-                    setTableId(event.target.value)
-                  }
+                  onChange={(event) => setTableId(event.target.value)}
                 >
-                  <option value="">
-                    Takeaway / counter order
-                  </option>
+                  <option value="">Takeaway / counter order</option>
 
                   {tables.map((table) => (
                     <option
                       key={table.id}
                       value={String(table.id)}
+                      disabled={table.is_occupied === true}
                     >
                       Table {table.table_number}
+                      {table.is_occupied === true
+                        ? " — Occupied"
+                        : " — Available"}
                     </option>
                   ))}
                 </select>
@@ -672,9 +625,7 @@ export default function POS() {
               <span>Customer (optional)</span>
               <input
                 value={customerName}
-                onChange={(event) =>
-                  setCustomerName(event.target.value)
-                }
+                onChange={(event) => setCustomerName(event.target.value)}
                 maxLength={100}
                 placeholder="Customer name"
               />
@@ -684,9 +635,7 @@ export default function POS() {
               <span>Order note (optional)</span>
               <input
                 value={customerNote}
-                onChange={(event) =>
-                  setCustomerNote(event.target.value)
-                }
+                onChange={(event) => setCustomerNote(event.target.value)}
                 maxLength={1000}
                 placeholder="Special requests"
               />
@@ -701,29 +650,18 @@ export default function POS() {
                 </div>
               ) : (
                 cart.map((item) => (
-                  <div
-                    className="pos-cart-item"
-                    key={item.id}
-                  >
+                  <div className="pos-cart-item" key={item.id}>
                     <div className="pos-cart-item-info">
                       <strong>{item.name}</strong>
-                      <span>
-                        {money(item.price)} each
-                      </span>
-                      <b>
-                        {money(
-                          item.price * item.quantity
-                        )}
-                      </b>
+                      <span>{money(item.price)} each</span>
+                      <b>{money(item.price * item.quantity)}</b>
                     </div>
 
                     <div className="pos-quantity-control">
                       <button
                         type="button"
                         aria-label={`Decrease ${item.name}`}
-                        onClick={() =>
-                          changeQuantity(item.id, -1)
-                        }
+                        onClick={() => changeQuantity(item.id, -1)}
                       >
                         <Minus size={14} />
                       </button>
@@ -734,9 +672,7 @@ export default function POS() {
                         type="button"
                         aria-label={`Increase ${item.name}`}
                         disabled={item.quantity >= 20}
-                        onClick={() =>
-                          changeQuantity(item.id, 1)
-                        }
+                        onClick={() => changeQuantity(item.id, 1)}
                       >
                         <Plus size={14} />
                       </button>
@@ -747,9 +683,7 @@ export default function POS() {
                         aria-label={`Remove ${item.name}`}
                         onClick={() =>
                           setCart((current) =>
-                            current.filter(
-                              (row) => row.id !== item.id
-                            )
+                            current.filter((row) => row.id !== item.id),
                           )
                         }
                       >
@@ -770,9 +704,7 @@ export default function POS() {
                   max={subtotal}
                   step="0.01"
                   value={discount}
-                  onChange={(event) =>
-                    setDiscount(event.target.value)
-                  }
+                  onChange={(event) => setDiscount(event.target.value)}
                 />
               </label>
 
@@ -784,9 +716,7 @@ export default function POS() {
                   max="100"
                   step="0.01"
                   value={taxRate}
-                  onChange={(event) =>
-                    setTaxRate(event.target.value)
-                  }
+                  onChange={(event) => setTaxRate(event.target.value)}
                 />
               </label>
             </div>
@@ -817,16 +747,13 @@ export default function POS() {
               <input
                 type="checkbox"
                 checked={collectPayment}
-                onChange={(event) =>
-                  setCollectPayment(event.target.checked)
-                }
+                onChange={(event) => setCollectPayment(event.target.checked)}
               />
 
               <span>
                 <strong>Record payment now</strong>
                 <small>
-                  Only check this after money has actually
-                  been received.
+                  Only check this after money has actually been received.
                 </small>
               </span>
             </label>
@@ -837,9 +764,7 @@ export default function POS() {
 
                 <select
                   value={paymentMethod}
-                  onChange={(event) =>
-                    setPaymentMethod(event.target.value)
-                  }
+                  onChange={(event) => setPaymentMethod(event.target.value)}
                 >
                   <option value="cash">Cash</option>
                   <option value="upi">UPI</option>
@@ -852,12 +777,7 @@ export default function POS() {
             <button
               className="pos-submit"
               type="submit"
-              disabled={
-                submitting ||
-                loading ||
-                !branchId ||
-                !cart.length
-              }
+              disabled={submitting || loading || !branchId || !cart.length}
             >
               {submitting ? (
                 "Processing…"
@@ -871,8 +791,8 @@ export default function POS() {
 
             <p className="pos-payment-note">
               <CircleDollarSign size={14} />
-              Payment recording is a staff confirmation, not
-              automatic bank or UPI verification.
+              Payment recording is a staff confirmation, not automatic bank or
+              UPI verification.
             </p>
           </form>
         </aside>
@@ -896,9 +816,7 @@ export default function POS() {
         </div>
 
         {!orders.length ? (
-          <p className="pos-empty-inline">
-            No orders yet for this branch.
-          </p>
+          <p className="pos-empty-inline">No orders yet for this branch.</p>
         ) : (
           <div className="pos-recent-grid">
             {orders.map((order) => (
@@ -908,10 +826,7 @@ export default function POS() {
               >
                 <div>
                   <strong>
-                    #
-                    {String(
-                      order.order_number || order.id
-                    ).slice(-8)}
+                    #{String(order.order_number || order.id).slice(-8)}
                   </strong>
 
                   <span>
@@ -925,7 +840,7 @@ export default function POS() {
 
                 <span
                   className={`pos-status pos-status-${String(
-                    order.status || "pending"
+                    order.status || "pending",
                   ).toLowerCase()}`}
                 >
                   {order.status || "pending"}
