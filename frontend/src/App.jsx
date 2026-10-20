@@ -24,6 +24,7 @@ import RevenueAnalytics from "./pages/RevenueAnalytics";
 import Profile from "./pages/Profile";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
+import POS from "./pages/POS";
 
 function ProtectedLayout({ children }) {
   return (
@@ -211,6 +212,14 @@ function App() {
           element={
             <ProtectedLayout>
               <Profile />
+            </ProtectedLayout>
+          }
+        />
+        <Route
+          path="/dashboard/pos"
+          element={
+            <ProtectedLayout>
+              <POS />
             </ProtectedLayout>
           }
         />

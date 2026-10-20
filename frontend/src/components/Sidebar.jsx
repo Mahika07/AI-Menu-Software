@@ -13,6 +13,7 @@ import {
   LogOut,
   Wallet,
   X,
+  Monitor,
 } from "lucide-react";
 
 import { getRestaurants } from "../api/restaurants";
@@ -36,6 +37,11 @@ const navigationItems = [
     label: "Revenue Analytics",
     path: "/dashboard/revenue-analytics",
     icon: Wallet,
+  },
+  {
+    label: "Point of Sale",
+    path: "/dashboard/pos",
+    icon: Monitor,
   },
 ];
 

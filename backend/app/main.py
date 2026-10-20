@@ -8,7 +8,7 @@ from slowapi import _rate_limit_exceeded_handler
 
 from app.core.config import settings
 from app.core.rate_limit import limiter
-
+from app.routes.pos import router as pos_router
 from app.routes.categories import router as category_router
 from app.routes.auth import router as auth_router
 from app.routes.restaurants import router as restaurant_router
@@ -110,7 +110,7 @@ app.include_router(owner_orders_router)
 app.include_router(sales_analytics_router)
 app.include_router(dining_sessions.router)
 app.include_router(bills_router)
-
+app.include_router(pos_router)
 # ---------------------------------------------------------
 # API v1
 # Existing routes remain available for backward compatibility.
@@ -135,7 +135,7 @@ app.include_router(orders_router, prefix=API_V1_PREFIX)
 app.include_router(owner_orders_router, prefix=API_V1_PREFIX)
 app.include_router(sales_analytics_router, prefix=API_V1_PREFIX)
 app.include_router(bills_router, prefix=API_V1_PREFIX)
-
+app.include_router(pos_router, prefix="/api/v1")
 @app.get("/health")
 def health():
     return {"status": "ok"}

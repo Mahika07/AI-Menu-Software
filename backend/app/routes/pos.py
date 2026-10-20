@@ -1,0 +1,160 @@
+
+from decimal import Decimal, ROUND_HALF_UP
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session, selectinload
+
+from app.core.dependencies import get_current_user
+from app.database.connection import get_db
+from app.models.branch import Branch
+from app.models.dish import Dish
+from app.models.order import Order, OrderItem
+from app.models.restaurant import Restaurant
+from app.models.table import RestaurantTable
+from app.models.user import User
+from app.schemas.order import OwnerOrderResponse
+from app.schemas.pos import POSOrderCreate
+
+router = APIRouter(prefix="/branches/{branch_id}/pos", tags=["POS"])
+
+
+def money(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def get_owned_branch(
+    db: Session,
+    branch_id: int,
+    current_user: User,
+) -> Branch:
+    branch = (
+        db.query(Branch)
+        .join(Restaurant, Restaurant.id == Branch.restaurant_id)
+        .filter(
+            Branch.id == branch_id,
+            Restaurant.owner_id == current_user.id,
+        )
+        .first()
+    )
+
+    if branch is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Branch not found.",
+        )
+
+    return branch
+
+
+@router.post(
+    "/orders",
+    response_model=OwnerOrderResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_pos_order(
+    branch_id: int,
+    payload: POSOrderCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a staff order using server-side menu prices."""
+
+    branch = get_owned_branch(db, branch_id, current_user)
+
+    table = None
+
+    if payload.table_id is not None:
+        table = (
+            db.query(RestaurantTable)
+            .filter(
+                RestaurantTable.id == payload.table_id,
+                RestaurantTable.branch_id == branch.id,
+                RestaurantTable.is_active.is_(True),
+            )
+            .first()
+        )
+
+        if table is None:
+            raise HTTPException(
+                status_code=422,
+                detail="The selected table is unavailable.",
+            )
+
+    requested_ids = [item.dish_id for item in payload.items]
+
+    dishes = (
+        db.query(Dish)
+        .filter(
+            Dish.id.in_(requested_ids),
+            Dish.branch_id == branch.id,
+            Dish.is_available.is_(True),
+        )
+        .all()
+    )
+
+    dishes_by_id = {dish.id: dish for dish in dishes}
+
+    if any(dish_id not in dishes_by_id for dish_id in requested_ids):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "One or more selected dishes are unavailable. "
+                "Refresh the POS menu and try again."
+            ),
+        )
+
+    order_items: list[OrderItem] = []
+    subtotal = Decimal("0.00")
+
+    for requested_item in payload.items:
+        dish = dishes_by_id[requested_item.dish_id]
+
+        unit_price = money(Decimal(str(dish.price)))
+        line_total = money(unit_price * requested_item.quantity)
+        subtotal += line_total
+
+        order_items.append(
+            OrderItem(
+                dish_id=dish.id,
+                dish_name=dish.name,
+                quantity=requested_item.quantity,
+                unit_price=unit_price,
+                line_total=line_total,
+                special_instructions=requested_item.special_instructions,
+                status="pending",
+            )
+        )
+
+    subtotal = money(subtotal)
+
+    order = Order(
+        branch_id=branch.id,
+        table_id=table.id if table else None,
+        table_number=table.table_number if table else "Takeaway",
+        dining_session_id=None,
+        status="pending",
+        customer_name=payload.customer_name,
+        customer_note=payload.customer_note,
+        subtotal=subtotal,
+        total_amount=subtotal,
+        items=order_items,
+    )
+
+    try:
+        db.add(order)
+        db.commit()
+        db.refresh(order)
+
+        return (
+            db.query(Order)
+            .options(selectinload(Order.items))
+            .filter(Order.id == order.id)
+            .one()
+        )
+
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to create POS order.",
+        )
