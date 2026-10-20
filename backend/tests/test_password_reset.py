@@ -11,10 +11,8 @@ os.environ.setdefault("CLOUDINARY_API_SECRET", "")
 
 from datetime import datetime, timedelta, timezone
 import hashlib
-import io
-import json
 import logging
-import urllib.error
+import smtplib
 
 import pytest
 from fastapi.testclient import TestClient
@@ -145,52 +143,117 @@ def test_forgot_password_provider_failure_keeps_generic_response(client, monkeyp
     db.close()
 
 
-def test_resend_success_is_logged_as_provider_acceptance(monkeypatch, caplog):
+def test_smtp_success_uses_starttls_and_sends_reset_message(monkeypatch, caplog):
     caplog.set_level(logging.INFO)
-    monkeypatch.setattr(auth_routes.settings, "RESEND_API_KEY", "test-secret")
-    monkeypatch.setattr(auth_routes.settings, "EMAIL_FROM", "Smart Menu <noreply@example.com>")
+    monkeypatch.setattr(auth_routes.settings, "SMTP_HOST", "smtp.gmail.com")
+    monkeypatch.setattr(auth_routes.settings, "SMTP_PORT", 587)
+    monkeypatch.setattr(auth_routes.settings, "SMTP_USERNAME", "sender@example.com")
+    monkeypatch.setattr(auth_routes.settings, "SMTP_PASSWORD", "test-smtp-password")
+    monkeypatch.setattr(auth_routes.settings, "EMAIL_FROM", "Smart Menu <sender@example.com>")
+    monkeypatch.setattr(auth_routes.settings, "FRONTEND_URL", "https://ai-menu-software.vercel.app")
+    captured = {}
 
-    class Response:
-        status = 200
+    class FakeSMTP:
+        def __init__(self, host, port, timeout):
+            captured.update(host=host, port=port, timeout=timeout)
         def __enter__(self):
             return self
         def __exit__(self, *args):
             return False
+        def ehlo(self):
+            captured["ehlo"] = True
+        def starttls(self, context):
+            captured["starttls_context"] = context
+        def login(self, username, password):
+            captured["login"] = (username, password)
+        def send_message(self, message):
+            captured["message"] = message
 
-    monkeypatch.setattr(auth_routes.urllib.request, "urlopen", lambda *args, **kwargs: Response())
+    monkeypatch.setattr(auth_routes.smtplib, "SMTP", FakeSMTP)
     auth_routes._send_password_reset_email("owner@example.com", "private-reset-token")
-    assert "accepted by provider=resend http_status=200" in caplog.text
+    assert captured["host"] == "smtp.gmail.com"
+    assert captured["port"] == 587
+    assert captured["starttls_context"] is not None
+    assert captured["login"] == ("sender@example.com", "test-smtp-password")
+    sent = captured["message"]
+    assert sent["To"] == "owner@example.com"
+    assert "https://ai-menu-software.vercel.app/reset-password?token=private-reset-token" in sent.get_body(preferencelist=("plain",)).get_content()
+    assert "Reset password" in sent.get_body(preferencelist=("html",)).get_content()
+    assert "accepted by SMTP server" in caplog.text
     assert "private-reset-token" not in caplog.text
     assert "owner@example.com" not in caplog.text
+    assert "ai-menu-software.vercel.app" not in caplog.text
+    assert "test-smtp-password" not in caplog.text
 
 
-def test_resend_http_failure_logs_sanitized_provider_details(monkeypatch, caplog):
-    monkeypatch.setattr(auth_routes.settings, "RESEND_API_KEY", "test-secret")
-    monkeypatch.setattr(auth_routes.settings, "EMAIL_FROM", "Smart Menu <noreply@example.com>")
-    body = json.dumps({"name": "validation_error", "message": "Invalid sender owner@example.com https://secret.example/reset?token=private", "token": "private-reset-token"}).encode()
+def test_smtp_auth_failure_logs_status_without_credentials(monkeypatch, caplog):
+    monkeypatch.setattr(auth_routes.settings, "SMTP_USERNAME", "sender@example.com")
+    monkeypatch.setattr(auth_routes.settings, "SMTP_PASSWORD", "test-smtp-password")
+    monkeypatch.setattr(auth_routes.settings, "EMAIL_FROM", "Smart Menu <sender@example.com>")
 
-    def reject(*args, **kwargs):
-        raise urllib.error.HTTPError("https://api.resend.com/emails", 422, "Unprocessable", {}, io.BytesIO(body))
+    class RejectingSMTP:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def ehlo(self):
+            pass
+        def starttls(self, context):
+            pass
+        def login(self, username, password):
+            raise smtplib.SMTPAuthenticationError(535, b"Authentication failed for sender@example.com")
 
-    monkeypatch.setattr(auth_routes.urllib.request, "urlopen", reject)
+    monkeypatch.setattr(auth_routes.smtplib, "SMTP", RejectingSMTP)
     with pytest.raises(RuntimeError):
         auth_routes._send_password_reset_email("owner@example.com", "private-reset-token")
-    assert "http_status=422" in caplog.text
-    assert "validation_error" in caplog.text
-    assert "Invalid sender [email] [url]" in caplog.text
-    assert "response_body=" in caplog.text
+    assert "smtp_status=535" in caplog.text
+    assert "owner@example.com" not in caplog.text
+    assert "sender@example.com" not in caplog.text
+    assert "private-reset-token" not in caplog.text
+    assert "test-smtp-password" not in caplog.text
+
+
+def test_smtp_recipient_rejection_is_not_logged_as_success(monkeypatch, caplog):
+    monkeypatch.setattr(auth_routes.settings, "SMTP_USERNAME", "sender@example.com")
+    monkeypatch.setattr(auth_routes.settings, "SMTP_PASSWORD", "test-smtp-password")
+    monkeypatch.setattr(auth_routes.settings, "EMAIL_FROM", "Smart Menu <sender@example.com>")
+
+    class RejectingSMTP:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def ehlo(self):
+            pass
+        def starttls(self, context):
+            pass
+        def login(self, username, password):
+            pass
+        def send_message(self, message):
+            return {"owner@example.com": (550, b"recipient rejected")}
+
+    monkeypatch.setattr(auth_routes.smtplib, "SMTP", RejectingSMTP)
+    with pytest.raises(RuntimeError):
+        auth_routes._send_password_reset_email("owner@example.com", "private-reset-token")
+    assert "SMTPRecipientsRefused" in caplog.text
+    assert "accepted by SMTP server" not in caplog.text
     assert "owner@example.com" not in caplog.text
     assert "private-reset-token" not in caplog.text
-    assert '"token":"[redacted]"' in caplog.text
-    assert "secret.example" not in caplog.text
+    assert "test-smtp-password" not in caplog.text
 
 
-def test_resend_missing_configuration_logs_only_variable_name(monkeypatch, caplog):
-    monkeypatch.setattr(auth_routes.settings, "RESEND_API_KEY", None)
-    monkeypatch.setattr(auth_routes.settings, "EMAIL_FROM", "Smart Menu <noreply@example.com>")
+def test_smtp_missing_configuration_logs_only_variable_name(monkeypatch, caplog):
+    monkeypatch.setattr(auth_routes.settings, "SMTP_USERNAME", "sender@example.com")
+    monkeypatch.setattr(auth_routes.settings, "SMTP_PASSWORD", None)
+    monkeypatch.setattr(auth_routes.settings, "EMAIL_FROM", "Smart Menu <sender@example.com>")
     with pytest.raises(RuntimeError, match="not configured"):
         auth_routes._send_password_reset_email("owner@example.com", "private-reset-token")
-    assert "variables=RESEND_API_KEY" in caplog.text
-    assert "test-secret" not in caplog.text
+    assert "variables=SMTP_PASSWORD" in caplog.text
+    assert "test-smtp-password" not in caplog.text
+    assert "sender@example.com" not in caplog.text
     assert "owner@example.com" not in caplog.text
     assert "private-reset-token" not in caplog.text
