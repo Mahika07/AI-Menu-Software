@@ -1,6 +1,6 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
@@ -44,18 +44,36 @@ def get_owned_branch(
     return branch
 
 
+
 def table_payload(db: Session, table: RestaurantTable) -> dict:
-    """Build a table response with occupancy calculated from its orders."""
+    """Calculate occupancy using active orders and unpaid bills."""
 
     outstanding_order = (
         db.query(Order.id)
-        .outerjoin(Bill, Bill.order_id == Order.id)
+        .outerjoin(
+            Bill,
+            and_(
+                Bill.order_id == Order.id,
+                Bill.branch_id == Order.branch_id,
+            ),
+        )
         .filter(
             Order.branch_id == table.branch_id,
             Order.table_id == table.id,
             or_(
-                Bill.id.is_(None),
-                Bill.payment_status != "paid",
+                # An existing bill keeps the table occupied until paid.
+                and_(
+                    Bill.id.is_not(None),
+                    or_(
+                        Bill.payment_status.is_(None),
+                        Bill.payment_status != "paid",
+                    ),
+                ),
+                # Without a bill, only a non-terminal order occupies it.
+                and_(
+                    Bill.id.is_(None),
+                    Order.status.notin_(["completed", "cancelled"]),
+                ),
             ),
         )
         .first()
@@ -69,7 +87,6 @@ def table_payload(db: Session, table: RestaurantTable) -> dict:
         "is_active": table.is_active,
         "is_occupied": outstanding_order is not None,
     }
-
 
 @router.post(
     "",
