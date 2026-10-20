@@ -25,6 +25,8 @@ class TableResponse(BaseModel):
     table_number: str
     qr_token: str
     is_active: bool
+
+    # Computed by the tables API, not stored in the database.
     is_occupied: bool = False
 
     model_config = {"from_attributes": True}

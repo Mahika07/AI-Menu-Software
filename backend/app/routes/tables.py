@@ -1,31 +1,23 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
-from sqlalchemy import distinct
 
 from app.database.connection import get_db
+from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.models.restaurant import Restaurant
 from app.models.branch import Branch
 from app.models.table import RestaurantTable
 from app.models.order import Order
-
-from app.schemas.table import (
-    TableCreate,
-    TableUpdate,
-    TableResponse,
-)
-
-from app.core.dependencies import get_current_user
+from app.models.bill import Bill
+from app.schemas.table import TableCreate, TableUpdate, TableResponse
 
 
 router = APIRouter(
     prefix="/branches/{branch_id}/tables",
     tags=["Tables"],
 )
-
-# An order occupies a table until it is explicitly completed or cancelled.
-CLOSED_ORDER_STATUSES = {"completed", "cancelled"}
 
 
 def get_owned_branch(
@@ -52,60 +44,31 @@ def get_owned_branch(
     return branch
 
 
-def get_occupied_table_ids(
-    db: Session,
-    branch_id: int,
-) -> set[int]:
-    rows = (
-        db.query(distinct(Order.table_id))
+def table_payload(db: Session, table: RestaurantTable) -> dict:
+    """Build a table response with occupancy calculated from its orders."""
+
+    outstanding_order = (
+        db.query(Order.id)
+        .outerjoin(Bill, Bill.order_id == Order.id)
         .filter(
-            Order.branch_id == branch_id,
-            Order.table_id.isnot(None),
-            Order.status.notin_(CLOSED_ORDER_STATUSES),
+            Order.branch_id == table.branch_id,
+            Order.table_id == table.id,
+            or_(
+                Bill.id.is_(None),
+                Bill.payment_status != "paid",
+            ),
         )
-        .all()
+        .first()
     )
 
-    return {row[0] for row in rows}
-
-
-def table_payload(
-    table: RestaurantTable,
-    occupied_table_ids: set[int],
-) -> dict:
     return {
         "id": table.id,
         "branch_id": table.branch_id,
         "table_number": table.table_number,
         "qr_token": table.qr_token,
         "is_active": table.is_active,
-        "is_occupied": table.id in occupied_table_ids,
+        "is_occupied": outstanding_order is not None,
     }
-
-
-def ensure_table_has_no_active_orders(
-    db: Session,
-    table: RestaurantTable,
-) -> None:
-    active_order = (
-        db.query(Order.id)
-        .filter(
-            Order.branch_id == table.branch_id,
-            Order.table_id == table.id,
-            Order.status.notin_(CLOSED_ORDER_STATUSES),
-        )
-        .first()
-    )
-
-    if active_order is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Table {table.table_number} has an active order. "
-                "Complete or cancel the order before deactivating "
-                "or deleting this table."
-            ),
-        )
 
 
 @router.post(
@@ -121,19 +84,11 @@ def create_table(
 ):
     branch = get_owned_branch(branch_id, current_user, db)
 
-    table_number = table_data.table_number.strip()
-
-    if not table_number:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Table number cannot be empty.",
-        )
-
     existing_table = (
         db.query(RestaurantTable)
         .filter(
             RestaurantTable.branch_id == branch.id,
-            RestaurantTable.table_number == table_number,
+            RestaurantTable.table_number == table_data.table_number,
         )
         .first()
     )
@@ -146,25 +101,17 @@ def create_table(
 
     new_table = RestaurantTable(
         branch_id=branch.id,
-        table_number=table_number,
-        is_active=True,
+        table_number=table_data.table_number,
     )
 
-    try:
-        db.add(new_table)
-        db.commit()
-        db.refresh(new_table)
-    except Exception:
-        db.rollback()
-        raise
+    db.add(new_table)
+    db.commit()
+    db.refresh(new_table)
 
-    return table_payload(new_table, set())
+    return table_payload(db, new_table)
 
 
-@router.get(
-    "",
-    response_model=list[TableResponse],
-)
+@router.get("", response_model=list[TableResponse])
 def get_tables(
     branch_id: int,
     current_user: User = Depends(get_current_user),
@@ -179,18 +126,10 @@ def get_tables(
         .all()
     )
 
-    occupied_ids = get_occupied_table_ids(db, branch.id)
-
-    return [
-        table_payload(table, occupied_ids)
-        for table in tables
-    ]
+    return [table_payload(db, table) for table in tables]
 
 
-@router.get(
-    "/{table_id}",
-    response_model=TableResponse,
-)
+@router.get("/{table_id}", response_model=TableResponse)
 def get_table(
     branch_id: int,
     table_id: int,
@@ -214,15 +153,10 @@ def get_table(
             detail="Table not found.",
         )
 
-    occupied_ids = get_occupied_table_ids(db, branch.id)
-
-    return table_payload(table, occupied_ids)
+    return table_payload(db, table)
 
 
-@router.put(
-    "/{table_id}",
-    response_model=TableResponse,
-)
+@router.put("/{table_id}", response_model=TableResponse)
 def update_table(
     branch_id: int,
     table_id: int,
@@ -238,7 +172,6 @@ def update_table(
             RestaurantTable.id == table_id,
             RestaurantTable.branch_id == branch.id,
         )
-        .with_for_update()
         .first()
     )
 
@@ -251,21 +184,11 @@ def update_table(
     updates = table_data.model_dump(exclude_unset=True)
 
     if "table_number" in updates:
-        new_number = updates["table_number"]
-
-        if new_number is None or not new_number.strip():
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Table number cannot be empty.",
-            )
-
-        new_number = new_number.strip()
-
         existing_table = (
             db.query(RestaurantTable)
             .filter(
                 RestaurantTable.branch_id == branch.id,
-                RestaurantTable.table_number == new_number,
+                RestaurantTable.table_number == updates["table_number"],
                 RestaurantTable.id != table.id,
             )
             .first()
@@ -277,24 +200,13 @@ def update_table(
                 detail="Table number already exists in this branch.",
             )
 
-        updates["table_number"] = new_number
-
-    if updates.get("is_active") is False and table.is_active:
-        ensure_table_has_no_active_orders(db, table)
-
     for field, value in updates.items():
         setattr(table, field, value)
 
-    try:
-        db.commit()
-        db.refresh(table)
-    except Exception:
-        db.rollback()
-        raise
+    db.commit()
+    db.refresh(table)
 
-    occupied_ids = get_occupied_table_ids(db, branch.id)
-
-    return table_payload(table, occupied_ids)
+    return table_payload(db, table)
 
 
 @router.delete(
@@ -315,7 +227,6 @@ def delete_table(
             RestaurantTable.id == table_id,
             RestaurantTable.branch_id == branch.id,
         )
-        .with_for_update()
         .first()
     )
 
@@ -325,13 +236,14 @@ def delete_table(
             detail="Table not found.",
         )
 
-    ensure_table_has_no_active_orders(db, table)
+    # Never delete a table while an order is still awaiting payment.
+    if table_payload(db, table)["is_occupied"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This table cannot be deleted while an order is awaiting payment.",
+        )
 
-    try:
-        db.delete(table)
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
+    db.delete(table)
+    db.commit()
 
     return None

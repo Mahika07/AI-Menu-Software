@@ -730,3 +730,19 @@
         font-size: 13px;
     }
 }
+
+.pos-field-help {
+    display: block;
+    margin-top: 5px;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.pos-field input:invalid:not(:placeholder-shown) {
+    border-color: #f87171;
+}
+
+.pos-field select option:disabled {
+    color: #9ca3af;
+}

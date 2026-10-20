@@ -2,6 +2,7 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.dependencies import get_current_user
@@ -14,7 +15,7 @@ from app.models.table import RestaurantTable
 from app.models.user import User
 from app.schemas.order import OwnerOrderResponse
 from app.schemas.pos import POSOrderCreate
-
+from app.models.bill import Bill
 router = APIRouter(prefix="/branches/{branch_id}/pos", tags=["POS"])
 
 
@@ -71,15 +72,38 @@ def create_pos_order(
                 RestaurantTable.id == payload.table_id,
                 RestaurantTable.branch_id == branch.id,
                 RestaurantTable.is_active.is_(True),
-            )
-            .with_for_update()
-            .first()
         )
+        .with_for_update()
+        .first()
+    )
 
         if table is None:
             raise HTTPException(
                 status_code=422,
                 detail="The selected table is unavailable.",
+            )
+        outstanding_order = (
+            db.query(Order.id)
+            .outerjoin(Bill, Bill.order_id == Order.id)
+            .filter(
+                Order.branch_id == branch.id,
+                Order.table_id == table.id,
+                or_(
+                    Bill.id.is_(None),
+                    Bill.payment_status != "paid",
+                ),
+            )
+            .first()
+        )
+
+        if outstanding_order:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This table is occupied. Its existing order "
+                    "must have a bill marked as paid before the "
+                    "table can be used again."
+                ),
             )
 
         active_order = (
@@ -155,6 +179,7 @@ def create_pos_order(
         dining_session_id=None,
         status="pending",
         customer_name=payload.customer_name,
+        customer_number=payload.customer_number,
         customer_note=payload.customer_note,
         subtotal=subtotal,
         total_amount=subtotal,

@@ -67,9 +67,16 @@ class Order(Base):
         index=True,
     )
 
+    
     customer_name: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,
+    )
+
+    customer_number: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        index=True,
     )
 
     customer_note: Mapped[str | None] = mapped_column(

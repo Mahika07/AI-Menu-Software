@@ -55,6 +55,7 @@ export default function POS() {
   const [tableId, setTableId] = useState("");
 
   const [customerName, setCustomerName] = useState("");
+  const [customerNumber, setCustomerNumber] = useState("");
   const [customerNote, setCustomerNote] = useState("");
 
   const [discount, setDiscount] = useState("0");
@@ -160,11 +161,21 @@ export default function POS() {
         })),
       );
 
-      setTables(
-        (Array.isArray(tableRows) ? tableRows : []).filter(
-          (table) => table.is_active !== false,
-        ),
+      const activeTables = (Array.isArray(tableRows) ? tableRows : []).filter(
+        (table) => table.is_active !== false,
       );
+
+      setTables(activeTables);
+
+      setTableId((currentId) => {
+        if (!currentId) return "";
+
+        const selectedTable = activeTables.find(
+          (table) => String(table.id) === currentId,
+        );
+
+        return selectedTable && !selectedTable.is_occupied ? currentId : "";
+      });
 
       setOrders((Array.isArray(orderRows) ? orderRows : []).slice(0, 6));
     } catch (err) {
@@ -194,6 +205,26 @@ export default function POS() {
 
   useEffect(() => {
     refreshBranchData();
+  }, [refreshBranchData]);
+
+  useEffect(() => {
+    const handleFocus = () => {
+      refreshBranchData();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refreshBranchData();
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [refreshBranchData]);
 
   const categories = useMemo(
@@ -310,6 +341,12 @@ export default function POS() {
       setError("Add at least one dish to the order.");
       return;
     }
+    const normalizedCustomerNumber = customerNumber.replace(/\D/g, "");
+
+    if (!/^[6-9]\d{9}$/.test(normalizedCustomerNumber)) {
+      setError("Enter a valid 10-digit Indian mobile number.");
+      return;
+    }
 
     if (
       !Number.isFinite(Number(discount)) ||
@@ -352,6 +389,7 @@ export default function POS() {
       createdOrder = await createPOSOrder(branchId, {
         ...(tableId ? { table_id: Number(tableId) } : {}),
         customer_name: customerName.trim() || null,
+        customer_number: normalizedCustomerNumber,
         customer_note: customerNote.trim() || null,
         items: cart.map((item) => ({
           dish_id: item.id,
@@ -370,6 +408,7 @@ export default function POS() {
 
       setCart([]);
       setCustomerName("");
+      setCustomerNumber("");
       setCustomerNote("");
       setDiscount("0");
       setTaxRate("0");
@@ -610,8 +649,8 @@ export default function POS() {
                       disabled={table.is_occupied === true}
                     >
                       Table {table.table_number}
-                      {table.is_occupied === true
-                        ? " — Occupied"
+                      {table.is_occupied
+                        ? " — Occupied (unpaid bill)"
                         : " — Available"}
                     </option>
                   ))}
@@ -622,13 +661,38 @@ export default function POS() {
             </label>
 
             <label className="pos-field">
-              <span>Customer (optional)</span>
+              <span>Customer name (optional)</span>
               <input
                 value={customerName}
                 onChange={(event) => setCustomerName(event.target.value)}
                 maxLength={100}
                 placeholder="Customer name"
               />
+            </label>
+
+            <label className="pos-field">
+              <span>Customer mobile number *</span>
+              <input
+                type="tel"
+                inputMode="numeric"
+                autoComplete="tel-national"
+                value={customerNumber}
+                onChange={(event) =>
+                  setCustomerNumber(
+                    event.target.value.replace(/\D/g, "").slice(0, 10),
+                  )
+                }
+                placeholder="10-digit mobile number"
+                required
+                minLength={10}
+                maxLength={10}
+                pattern="[6-9][0-9]{9}"
+                title="Enter a valid 10-digit Indian mobile number"
+                aria-label="Required customer mobile number"
+              />
+              <small className="pos-field-help">
+                Required for every POS order.
+              </small>
             </label>
 
             <label className="pos-field">
@@ -777,7 +841,13 @@ export default function POS() {
             <button
               className="pos-submit"
               type="submit"
-              disabled={submitting || loading || !branchId || !cart.length}
+              disabled={
+                submitting ||
+                loading ||
+                !branchId ||
+                !cart.length ||
+                !/^[6-9]\d{9}$/.test(customerNumber)
+              }
             >
               {submitting ? (
                 "Processing…"
