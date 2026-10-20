@@ -2,7 +2,7 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.dependencies import get_current_user
@@ -84,13 +84,30 @@ def create_pos_order(
             )
         outstanding_order = (
             db.query(Order.id)
-            .outerjoin(Bill, Bill.order_id == Order.id)
+            .outerjoin(
+                Bill,
+                and_(
+                    Bill.order_id == Order.id,
+                    Bill.branch_id == Order.branch_id,
+                ),
+            )
             .filter(
                 Order.branch_id == branch.id,
                 Order.table_id == table.id,
                 or_(
-                    Bill.id.is_(None),
-                    Bill.payment_status != "paid",
+                    # A bill exists and payment is not complete.
+                    and_(
+                        Bill.id.is_not(None),
+                        or_(
+                            Bill.payment_status.is_(None),
+                            Bill.payment_status != "paid",
+                        ),
+                    ),
+                    # No bill exists, but the order is still active.
+                    and_(
+                        Bill.id.is_(None),
+                        Order.status.notin_(["completed", "cancelled"]),
+                    ),
                 ),
             )
             .first()
@@ -105,26 +122,7 @@ def create_pos_order(
                     "table can be used again."
                 ),
             )
-
-        active_order = (
-            db.query(Order.id)
-            .filter(
-                Order.branch_id == branch.id,
-                Order.table_id == table.id,
-                Order.status.notin_({"completed", "cancelled"}),
-            )
-            .first()
-        )
-
-        if active_order is not None:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Table {table.table_number} already has an active order. "
-                    "Complete or cancel that order before creating another."
-                ),
-            )
-
+        
     requested_ids = [item.dish_id for item in payload.items]
 
     dishes = (
