@@ -236,6 +236,51 @@ export async function getBranchOrders(
     return response.data;
 }
 
+export async function getBranchOrderHistory(
+    branchId,
+    {
+        search = "",
+        status = "",
+        tableNumber = "",
+        startDate = "",
+        endDate = "",
+        limit = 20,
+        offset = 0,
+    } = {},
+) {
+    const params = {
+        limit,
+        offset,
+    };
+
+    if (search.trim()) {
+        params.search = search.trim();
+    }
+
+    if (status) {
+        params.status = status;
+    }
+
+    if (tableNumber.trim()) {
+        params.table_number = tableNumber.trim();
+    }
+
+    if (startDate) {
+        params.start_date = startDate;
+    }
+
+    if (endDate) {
+        params.end_date = endDate;
+    }
+
+    const response = await api.get(
+        `/branches/${encodeURIComponent(branchId)}/orders/history`,
+        { params },
+    );
+
+    return response.data;
+}
+
 export async function updateOrderStatus(branchId, orderId, status) {
     const response = await api.patch(
         `/branches/${encodeURIComponent(branchId)}/orders/${encodeURIComponent(orderId)}/status`,

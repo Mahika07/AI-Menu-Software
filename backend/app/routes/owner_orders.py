@@ -1,4 +1,6 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
+
+from sqlalchemy import func, or_
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -199,6 +201,111 @@ def list_branch_orders(
         .limit(limit)
         .all()
     )
+
+
+@router.get("/history")
+def list_branch_order_history(
+    branch_id: int,
+    search: str | None = Query(default=None, max_length=100),
+    order_status: Literal[
+        "pending",
+        "confirmed",
+        "preparing",
+        "ready",
+        "completed",
+        "cancelled",
+    ] | None = Query(default=None, alias="status"),
+    table_number: str | None = Query(default=None, max_length=50),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Search and paginate order history for an owned branch."""
+
+    branch = get_owned_branch(
+        branch_id,
+        current_user,
+        db,
+    )
+
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(
+            status_code=422,
+            detail="Start date cannot be after end date.",
+        )
+
+    query = db.query(Order).filter(
+        Order.branch_id == branch.id,
+    )
+
+    if order_status:
+        query = query.filter(Order.status == order_status)
+
+    if table_number and table_number.strip():
+        query = query.filter(
+            Order.table_number == table_number.strip()
+        )
+
+    if search and search.strip():
+        term = search.strip()
+        pattern = f"%{term}%"
+
+        search_conditions = [
+            Order.order_number.ilike(pattern),
+            Order.customer_name.ilike(pattern),
+        ]
+
+        # Support customer mobile search when the model has this field.
+        if hasattr(Order, "customer_number"):
+            search_conditions.append(
+                Order.customer_number.ilike(pattern)
+            )
+
+        query = query.filter(or_(*search_conditions))
+
+    if start_date:
+        start_datetime = datetime.combine(
+            start_date,
+            time.min,
+            tzinfo=timezone.utc,
+        )
+        query = query.filter(
+            Order.created_at >= start_datetime
+        )
+
+    if end_date:
+        end_datetime = datetime.combine(
+            end_date + timedelta(days=1),
+            time.min,
+            tzinfo=timezone.utc,
+        )
+        query = query.filter(
+            Order.created_at < end_datetime
+        )
+
+    total = query.order_by(None).count()
+
+    items = (
+        query
+        .options(selectinload(Order.items))
+        .order_by(
+            Order.created_at.desc(),
+            Order.id.desc(),
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    return {
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.patch(

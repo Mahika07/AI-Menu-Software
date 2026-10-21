@@ -12,13 +12,23 @@ import {
   Printer,
   ReceiptText,
   ExternalLink,
+  History,
+  Search,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 import { getRestaurants } from "../api/restaurants";
 import { getBranches } from "../api/branches";
-import { getBranchOrders, updateOrderStatus } from "../api/orders";
+import {
+  getBranchOrders,
+  getBranchOrderHistory,
+  updateOrderStatus,
+} from "../api/orders";
 import { getBranchBills } from "../api/bills";
 import GenerateBillModal from "../components/GenerateBillModal";
+
+const HISTORY_PAGE_SIZE = 20;
 
 const STATUS_LABELS = {
   pending: "Pending",
@@ -260,7 +270,20 @@ function Orders() {
   const [error, setError] = useState("");
   const [lastUpdated, setLastUpdated] = useState(null);
 
-  // Load restaurants
+  const [activeTab, setActiveTab] = useState("live");
+
+  const [historyOrders, setHistoryOrders] = useState([]);
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyStatus, setHistoryStatus] = useState("");
+  const [historyTable, setHistoryTable] = useState("");
+  const [historyStartDate, setHistoryStartDate] = useState("");
+  const [historyEndDate, setHistoryEndDate] = useState("");
+  const [historyPage, setHistoryPage] = useState(0);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+
+  // Load restaurants.
   useEffect(() => {
     let cancelled = false;
 
@@ -296,7 +319,7 @@ function Orders() {
     };
   }, []);
 
-  // Load branches when restaurant changes
+  // Load branches when the restaurant changes.
   useEffect(() => {
     let cancelled = false;
 
@@ -305,6 +328,9 @@ function Orders() {
       setBranchId("");
       setOrders([]);
       setBills([]);
+      setHistoryOrders([]);
+      setHistoryTotal(0);
+      setHistoryPage(0);
 
       if (!restaurantId) {
         setLoadingBranches(false);
@@ -340,7 +366,7 @@ function Orders() {
     };
   }, [restaurantId]);
 
-  // Load orders
+  // Load live orders.
   const loadOrders = useCallback(
     async (showLoader = false) => {
       if (!branchId) {
@@ -353,7 +379,7 @@ function Orders() {
 
         const data = await getBranchOrders(branchId, statusFilter);
 
-        setOrders(data);
+        setOrders(Array.isArray(data) ? data : []);
         setLastUpdated(new Date());
       } catch (err) {
         setError(
@@ -367,7 +393,55 @@ function Orders() {
     [branchId, statusFilter],
   );
 
-  // Load bills for the selected branch
+  // Load paginated order history.
+  const loadOrderHistory = useCallback(async () => {
+    if (!branchId) {
+      setHistoryOrders([]);
+      setHistoryTotal(0);
+      return;
+    }
+
+    try {
+      setLoadingHistory(true);
+      setHistoryError("");
+
+      const result = await getBranchOrderHistory(branchId, {
+        search: historySearch,
+        status: historyStatus,
+        tableNumber: historyTable,
+        startDate: historyStartDate,
+        endDate: historyEndDate,
+        limit: HISTORY_PAGE_SIZE,
+        offset: historyPage * HISTORY_PAGE_SIZE,
+      });
+
+      setHistoryOrders(Array.isArray(result.items) ? result.items : []);
+      setHistoryTotal(Number(result.total || 0));
+    } catch (err) {
+      setHistoryError(
+        err.response?.data?.detail ||
+          "Unable to load order history. Please try again.",
+      );
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, [
+    branchId,
+    historySearch,
+    historyStatus,
+    historyTable,
+    historyStartDate,
+    historyEndDate,
+    historyPage,
+  ]);
+
+  useEffect(() => {
+    if (activeTab === "history") {
+      loadOrderHistory();
+    }
+  }, [activeTab, loadOrderHistory]);
+
+  // Load bills for the selected branch.
   const loadBills = useCallback(
     async (showLoader = false) => {
       if (!branchId) {
@@ -380,7 +454,6 @@ function Orders() {
 
         const data = await getBranchBills(branchId);
 
-        // Supports APIs that return either an array or a wrapped list.
         const billList = Array.isArray(data)
           ? data
           : Array.isArray(data?.items)
@@ -402,7 +475,7 @@ function Orders() {
     [branchId],
   );
 
-  // Refresh orders and bills every 15 seconds
+  // Refresh live orders and bills every 15 seconds.
   useEffect(() => {
     if (!branchId) {
       setOrders([]);
@@ -419,14 +492,12 @@ function Orders() {
     }, 15000);
 
     return () => window.clearInterval(intervalId);
-  }, [branchId, statusFilter, loadOrders, loadBills]);
+  }, [branchId, loadOrders, loadBills]);
 
-  // Find an existing bill for an order
   function getBillForOrder(orderId) {
     return bills.find((bill) => String(bill.order_id) === String(orderId));
   }
 
-  // Update order status
   async function handleStatusChange(order, nextStatus) {
     if (!branchId || updatingOrderId !== null) return;
 
@@ -459,7 +530,6 @@ function Orders() {
     }
   }
 
-  // Open the bill-generation modal
   function handleGenerateBill(order) {
     if (!branchId || order.id == null) {
       setError("A valid branch and order are required to generate a bill.");
@@ -477,7 +547,6 @@ function Orders() {
     setBillingOrder(order);
   }
 
-  // Open the receipt page for an existing bill
   function handleViewBill(bill, fallbackOrder = null) {
     if (!bill) return;
 
@@ -498,7 +567,6 @@ function Orders() {
     });
   }
 
-  // Refresh the bill list after creating a bill
   async function handleBillGenerated(bill) {
     const order = bill.order || billingOrder;
 
@@ -549,29 +617,31 @@ function Orders() {
       <div className="page-header">
         <div>
           <h1>Orders</h1>
-          <p>Manage dine-in orders from your table QR codes.</p>
+          <p>Manage dine-in orders and review previous transactions.</p>
         </div>
 
         <button
           type="button"
           className="secondary-button"
           onClick={() => {
-            loadOrders(true);
-            loadBills(true);
+            if (activeTab === "history") {
+              loadOrderHistory();
+            } else {
+              loadOrders(true);
+              loadBills(true);
+            }
           }}
-          disabled={!branchId || loadingOrders || loadingBills}
+          disabled={
+            !branchId ||
+            (activeTab === "history"
+              ? loadingHistory
+              : loadingOrders || loadingBills)
+          }
         >
           <RefreshCw size={17} />
           Refresh
         </button>
       </div>
-
-      {error && (
-        <div className="error-message" role="alert">
-          <AlertCircle size={18} />
-          {error}
-        </div>
-      )}
 
       <section className="orders-toolbar">
         <label>
@@ -597,7 +667,10 @@ function Orders() {
           Branch
           <select
             value={branchId}
-            onChange={(event) => setBranchId(event.target.value)}
+            onChange={(event) => {
+              setBranchId(event.target.value);
+              setHistoryPage(0);
+            }}
             disabled={loadingBranches || branches.length === 0}
           >
             {branches.length === 0 && (
@@ -613,246 +686,528 @@ function Orders() {
             ))}
           </select>
         </label>
-
-        <label>
-          Status
-          <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
-          >
-            <option value="">All orders</option>
-            <option value="pending">Pending</option>
-            <option value="confirmed">Confirmed</option>
-            <option value="preparing">Preparing</option>
-            <option value="ready">Ready</option>
-            <option value="completed">Completed</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-        </label>
       </section>
 
-      <section className="orders-summary-row">
-        <div className="orders-summary-card">
-          <span>Orders shown</span>
-          <strong>{orders.length}</strong>
-        </div>
+      <div className="orders-tabs" role="tablist" aria-label="Order views">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "live"}
+          className={`orders-tab ${activeTab === "live" ? "active" : ""}`}
+          onClick={() => setActiveTab("live")}
+        >
+          <ClipboardList size={17} />
+          Live Orders
+        </button>
 
-        <div className="orders-summary-card">
-          <span>Active orders shown</span>
-          <strong>{activeCount}</strong>
-        </div>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "history"}
+          className={`orders-tab ${activeTab === "history" ? "active" : ""}`}
+          onClick={() => setActiveTab("history")}
+        >
+          <History size={17} />
+          Order History
+          <span className="orders-tab-count">{historyTotal}</span>
+        </button>
+      </div>
 
-        <div className="orders-last-updated">
-          {lastUpdated
-            ? `Updated ${lastUpdated.toLocaleTimeString("en-IN")}`
-            : "Waiting for orders"}
-          <span>Auto-refreshes every 15 seconds</span>
-        </div>
-      </section>
+      {activeTab === "live" && (
+        <>
+          {error && (
+            <div className="error-message" role="alert">
+              <AlertCircle size={18} />
+              {error}
+            </div>
+          )}
 
-      {!branchId && !loadingBranches ? (
-        <div className="empty-state">
-          <ClipboardList size={38} />
-          <h2>No branch selected</h2>
-          <p>Create a restaurant branch before managing orders.</p>
-        </div>
-      ) : loadingOrders ? (
-        <div className="loading">Loading orders...</div>
-      ) : orders.length === 0 ? (
-        <div className="empty-state">
-          <ClipboardList size={40} />
-          <h2>No orders found</h2>
-          <p>
-            New customer orders placed through this branch&apos;s table QR codes
-            will appear here.
-          </p>
-        </div>
-      ) : (
-        <div className="orders-grid">
-          {orders.map((order) => {
-            const nextAction = NEXT_ACTIONS[order.status];
-            const updating = updatingOrderId === order.id;
-            const existingBill = getBillForOrder(order.id);
-            const billCheckPending = loadingBills && !existingBill;
-
-            return (
-              <article
-                className="owner-order-card"
-                key={order.id ?? order.order_number}
+          <section className="orders-toolbar">
+            <label>
+              Status
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
               >
-                <header className="owner-order-header">
-                  <div>
-                    <span className="owner-order-number">
-                      Order #
-                      {String(order.order_number || order.id).slice(0, 8)}
-                    </span>
+                <option value="">All orders</option>
+                <option value="pending">Pending</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="preparing">Preparing</option>
+                <option value="ready">Ready</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </label>
+          </section>
 
-                    <h2>
-                      {order.table_number
-                        ? `Table ${order.table_number}`
-                        : "Takeaway / No table"}
-                    </h2>
+          <section className="orders-summary-row">
+            <div className="orders-summary-card">
+              <span>Orders shown</span>
+              <strong>{orders.length}</strong>
+            </div>
 
-                    <span className="owner-order-time">
-                      <Clock size={14} />
-                      {formatDate(order.created_at)}
-                    </span>
-                  </div>
+            <div className="orders-summary-card">
+              <span>Active orders shown</span>
+              <strong>{activeCount}</strong>
+            </div>
 
-                  <span className={`order-status-badge status-${order.status}`}>
-                    {STATUS_LABELS[order.status] || order.status}
-                  </span>
-                </header>
+            <div className="orders-last-updated">
+              {lastUpdated
+                ? `Updated ${lastUpdated.toLocaleTimeString("en-IN")}`
+                : "Waiting for orders"}
+              <span>Auto-refreshes every 15 seconds</span>
+            </div>
+          </section>
 
-                {order.customer_name && (
-                  <p className="owner-order-customer">
-                    Customer: <strong>{order.customer_name}</strong>
-                  </p>
-                )}
+          {!branchId && !loadingBranches ? (
+            <div className="empty-state">
+              <ClipboardList size={38} />
+              <h2>No branch selected</h2>
+              <p>Create a restaurant branch before managing orders.</p>
+            </div>
+          ) : loadingOrders ? (
+            <div className="loading">Loading orders...</div>
+          ) : orders.length === 0 ? (
+            <div className="empty-state">
+              <ClipboardList size={40} />
+              <h2>No orders found</h2>
+              <p>
+                New customer orders placed through this branch&apos;s table QR
+                codes will appear here.
+              </p>
+            </div>
+          ) : (
+            <div className="orders-grid">
+              {orders.map((order) => {
+                const nextAction = NEXT_ACTIONS[order.status];
+                const updating = updatingOrderId === order.id;
+                const existingBill = getBillForOrder(order.id);
+                const billCheckPending = loadingBills && !existingBill;
 
-                {order.customer_note && (
-                  <div className="owner-order-note">
-                    <strong>Customer note</strong>
-                    <p>{order.customer_note}</p>
-                  </div>
-                )}
-
-                <div className="owner-order-items">
-                  {(order.items || []).map((item, index) => (
-                    <div
-                      className="owner-order-item"
-                      key={item.id ?? `${item.dish_name}-${index}`}
-                    >
+                return (
+                  <article
+                    className="owner-order-card"
+                    key={order.id ?? order.order_number}
+                  >
+                    <header className="owner-order-header">
                       <div>
-                        <strong>
-                          {item.quantity} × {item.dish_name}
-                        </strong>
+                        <span className="owner-order-number">
+                          Order #
+                          {String(order.order_number || order.id).slice(0, 8)}
+                        </span>
 
-                        {item.special_instructions && (
-                          <p>{item.special_instructions}</p>
-                        )}
+                        <h2>
+                          {order.table_number
+                            ? `Table ${order.table_number}`
+                            : "Takeaway / No table"}
+                        </h2>
+
+                        <span className="owner-order-time">
+                          <Clock size={14} />
+                          {formatDate(order.created_at)}
+                        </span>
                       </div>
 
-                      <span>{formatMoney(item.line_total)}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="owner-order-total">
-                  <span>Total</span>
-                  <strong>{formatMoney(order.total_amount)}</strong>
-                </div>
-
-                {existingBill && (
-                  <div className="owner-order-note">
-                    <strong>Bill generated</strong>
-                    <p>
-                      {existingBill.bill_number} ·{" "}
-                      {formatMoney(existingBill.total_amount)} ·{" "}
-                      {existingBill.payment_status || "unpaid"}
-                    </p>
-                  </div>
-                )}
-
-                <footer className="owner-order-actions">
-                  {order.status === "completed" &&
-                    (existingBill ? (
-                      <button
-                        type="button"
-                        className="primary-button"
-                        onClick={() => handleViewBill(existingBill, order)}
+                      <span
+                        className={`order-status-badge status-${order.status}`}
                       >
-                        <ExternalLink size={16} />
-                        View Bill
-                      </button>
-                    ) : (
+                        {STATUS_LABELS[order.status] || order.status}
+                      </span>
+                    </header>
+
+                    {order.customer_name && (
+                      <p className="owner-order-customer">
+                        Customer: <strong>{order.customer_name}</strong>
+                      </p>
+                    )}
+
+                    {order.customer_note && (
+                      <div className="owner-order-note">
+                        <strong>Customer note</strong>
+                        <p>{order.customer_note}</p>
+                      </div>
+                    )}
+
+                    <div className="owner-order-items">
+                      {(order.items || []).map((item, index) => (
+                        <div
+                          className="owner-order-item"
+                          key={item.id ?? `${item.dish_name}-${index}`}
+                        >
+                          <div>
+                            <strong>
+                              {item.quantity} × {item.dish_name}
+                            </strong>
+
+                            {item.special_instructions && (
+                              <p>{item.special_instructions}</p>
+                            )}
+                          </div>
+
+                          <span>{formatMoney(item.line_total)}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="owner-order-total">
+                      <span>Total</span>
+                      <strong>{formatMoney(order.total_amount)}</strong>
+                    </div>
+
+                    {existingBill && (
+                      <div className="owner-order-note">
+                        <strong>Bill generated</strong>
+                        <p>
+                          {existingBill.bill_number} ·{" "}
+                          {formatMoney(existingBill.total_amount)} ·{" "}
+                          {existingBill.payment_status || "unpaid"}
+                        </p>
+                      </div>
+                    )}
+
+                    <footer className="owner-order-actions">
+                      {order.status === "completed" &&
+                        (existingBill ? (
+                          <button
+                            type="button"
+                            className="primary-button"
+                            onClick={() => handleViewBill(existingBill, order)}
+                          >
+                            <ExternalLink size={16} />
+                            View Bill
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="primary-button"
+                            onClick={() => handleGenerateBill(order)}
+                            disabled={
+                              updatingOrderId !== null ||
+                              loadingBills ||
+                              billCheckPending
+                            }
+                          >
+                            <ReceiptText size={16} />
+                            {loadingBills
+                              ? "Checking bill..."
+                              : "Generate Bill"}
+                          </button>
+                        ))}
+
                       <button
                         type="button"
-                        className="primary-button"
-                        onClick={() => handleGenerateBill(order)}
-                        disabled={
-                          updatingOrderId !== null ||
-                          loadingBills ||
-                          billCheckPending
+                        className="secondary-button"
+                        onClick={() =>
+                          printOrderReceipt(
+                            order,
+                            selectedRestaurant,
+                            selectedBranch,
+                          )
                         }
                       >
-                        <ReceiptText size={16} />
-                        {loadingBills ? "Checking bill..." : "Generate Bill"}
+                        <Printer size={16} />
+                        Print receipt
                       </button>
-                    ))}
 
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() =>
-                      printOrderReceipt(
-                        order,
-                        selectedRestaurant,
-                        selectedBranch,
-                      )
-                    }
-                  >
-                    <Printer size={16} />
-                    Print receipt
-                  </button>
+                      {nextAction && (
+                        <button
+                          type="button"
+                          className="primary-button"
+                          disabled={updating || updatingOrderId !== null}
+                          onClick={() =>
+                            handleStatusChange(order, nextAction.status)
+                          }
+                        >
+                          {updating ? (
+                            "Updating..."
+                          ) : (
+                            <>
+                              {order.status === "pending" && (
+                                <CheckCircle2 size={16} />
+                              )}
 
-                  {nextAction && (
-                    <button
-                      type="button"
-                      className="primary-button"
-                      disabled={updating || updatingOrderId !== null}
-                      onClick={() =>
-                        handleStatusChange(order, nextAction.status)
-                      }
-                    >
-                      {updating ? (
-                        "Updating..."
-                      ) : (
-                        <>
-                          {order.status === "pending" && (
-                            <CheckCircle2 size={16} />
+                              {order.status === "confirmed" && (
+                                <ChefHat size={16} />
+                              )}
+
+                              {order.status === "preparing" && (
+                                <Utensils size={16} />
+                              )}
+
+                              {nextAction.label}
+                            </>
                           )}
-
-                          {order.status === "confirmed" && (
-                            <ChefHat size={16} />
-                          )}
-
-                          {order.status === "preparing" && (
-                            <Utensils size={16} />
-                          )}
-
-                          {nextAction.label}
-                        </>
+                        </button>
                       )}
-                    </button>
-                  )}
 
-                  {["pending", "confirmed", "preparing"].includes(
-                    order.status,
-                  ) && (
-                    <button
-                      type="button"
-                      className="danger-button"
-                      disabled={updating || updatingOrderId !== null}
-                      onClick={() => handleStatusChange(order, "cancelled")}
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </footer>
-              </article>
-            );
-          })}
-        </div>
+                      {["pending", "confirmed", "preparing"].includes(
+                        order.status,
+                      ) && (
+                        <button
+                          type="button"
+                          className="danger-button"
+                          disabled={updating || updatingOrderId !== null}
+                          onClick={() => handleStatusChange(order, "cancelled")}
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </footer>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+
+          {billingOrder && branchId && (
+            <GenerateBillModal
+              order={billingOrder}
+              branchId={branchId}
+              onClose={() => setBillingOrder(null)}
+              onGenerated={handleBillGenerated}
+            />
+          )}
+        </>
       )}
 
-      {billingOrder && branchId && (
-        <GenerateBillModal
-          order={billingOrder}
-          branchId={branchId}
-          onClose={() => setBillingOrder(null)}
-          onGenerated={handleBillGenerated}
-        />
+      {activeTab === "history" && (
+        <section className="order-history">
+          <div className="order-history-heading">
+            <div>
+              <h2>Order History</h2>
+              <p>Search and review previous orders for the selected branch.</p>
+            </div>
+
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={loadOrderHistory}
+              disabled={!branchId || loadingHistory}
+            >
+              <RefreshCw size={16} />
+              Refresh
+            </button>
+          </div>
+
+          {historyError && (
+            <div className="error-message" role="alert">
+              <AlertCircle size={18} />
+              {historyError}
+            </div>
+          )}
+
+          <div className="order-history-filters">
+            <label>
+              Search orders
+              <div className="order-history-search">
+                <Search size={17} />
+                <input
+                  type="search"
+                  placeholder="Order number or customer"
+                  value={historySearch}
+                  onChange={(event) => {
+                    setHistorySearch(event.target.value);
+                    setHistoryPage(0);
+                  }}
+                />
+              </div>
+            </label>
+
+            <label>
+              Status
+              <select
+                value={historyStatus}
+                onChange={(event) => {
+                  setHistoryStatus(event.target.value);
+                  setHistoryPage(0);
+                }}
+              >
+                <option value="">All statuses</option>
+                <option value="pending">Pending</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="preparing">Preparing</option>
+                <option value="ready">Ready</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </label>
+
+            <label>
+              Table number
+              <input
+                type="text"
+                placeholder="Any table"
+                value={historyTable}
+                onChange={(event) => {
+                  setHistoryTable(event.target.value);
+                  setHistoryPage(0);
+                }}
+              />
+            </label>
+
+            <label>
+              From date
+              <input
+                type="date"
+                value={historyStartDate}
+                max={historyEndDate || undefined}
+                onChange={(event) => {
+                  setHistoryStartDate(event.target.value);
+                  setHistoryPage(0);
+                }}
+              />
+            </label>
+
+            <label>
+              To date
+              <input
+                type="date"
+                value={historyEndDate}
+                min={historyStartDate || undefined}
+                onChange={(event) => {
+                  setHistoryEndDate(event.target.value);
+                  setHistoryPage(0);
+                }}
+              />
+            </label>
+
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => {
+                setHistorySearch("");
+                setHistoryStatus("");
+                setHistoryTable("");
+                setHistoryStartDate("");
+                setHistoryEndDate("");
+                setHistoryPage(0);
+              }}
+            >
+              Clear filters
+            </button>
+          </div>
+
+          <div className="order-history-summary">
+            <span>
+              {historyTotal} {historyTotal === 1 ? "order" : "orders"} found
+            </span>
+            <span>Page {historyPage + 1}</span>
+          </div>
+
+          {loadingHistory ? (
+            <div className="loading">Loading order history...</div>
+          ) : historyOrders.length === 0 ? (
+            <div className="empty-state">
+              <History size={38} />
+              <h2>No matching orders</h2>
+              <p>Try changing your search or filters.</p>
+            </div>
+          ) : (
+            <div className="order-history-list">
+              {historyOrders.map((order) => (
+                <article
+                  className="order-history-card"
+                  key={order.id ?? order.order_number}
+                >
+                  <div className="order-history-card-top">
+                    <div>
+                      <strong>
+                        Order #
+                        {String(order.order_number || order.id).slice(0, 8)}
+                      </strong>
+                      <p>{formatDate(order.created_at)}</p>
+                    </div>
+
+                    <span
+                      className={`order-status-badge status-${order.status}`}
+                    >
+                      {STATUS_LABELS[order.status] || order.status}
+                    </span>
+                  </div>
+
+                  <div className="order-history-card-details">
+                    <span>
+                      Table: {order.table_number || "Takeaway / No table"}
+                    </span>
+                    <span>Customer: {order.customer_name || "Walk-in"}</span>
+                    <strong>{formatMoney(order.total_amount)}</strong>
+                  </div>
+
+                  <div className="order-history-items">
+                    {(order.items || []).map((item, index) => (
+                      <div
+                        key={item.id ?? `${item.dish_name}-${index}`}
+                        className="order-history-item"
+                      >
+                        <span>
+                          {item.quantity} × {item.dish_name}
+                        </span>
+                        <span>{formatMoney(item.line_total)}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {order.customer_note && (
+                    <p className="order-history-note">
+                      <strong>Note:</strong> {order.customer_note}
+                    </p>
+                  )}
+
+                  <div className="order-history-actions">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() =>
+                        printOrderReceipt(
+                          order,
+                          selectedRestaurant,
+                          selectedBranch,
+                        )
+                      }
+                    >
+                      <Printer size={16} />
+                      Print receipt
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+
+          <div className="order-history-pagination">
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={historyPage === 0 || loadingHistory}
+              onClick={() => setHistoryPage((page) => Math.max(0, page - 1))}
+            >
+              <ChevronLeft size={17} />
+              Previous
+            </button>
+
+            <span>
+              {historyTotal === 0
+                ? "0 orders"
+                : `${historyPage * HISTORY_PAGE_SIZE + 1}–${Math.min(
+                    (historyPage + 1) * HISTORY_PAGE_SIZE,
+                    historyTotal,
+                  )} of ${historyTotal}`}
+            </span>
+
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={
+                loadingHistory ||
+                (historyPage + 1) * HISTORY_PAGE_SIZE >= historyTotal
+              }
+              onClick={() => setHistoryPage((page) => page + 1)}
+            >
+              Next
+              <ChevronRight size={17} />
+            </button>
+          </div>
+        </section>
       )}
     </div>
   );
