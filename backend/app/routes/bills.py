@@ -106,6 +106,7 @@ def list_bills(
 
 
 
+
 @router.get("/paginated")
 def list_bills_paginated(
     branch_id: int,
@@ -113,14 +114,24 @@ def list_bills_paginated(
     offset: int = Query(default=0, ge=0),
     search: str | None = Query(default=None, max_length=100),
     payment_status: str | None = Query(default=None, max_length=20),
+    payment_method: str | None = Query(default=None, max_length=30),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Return filtered bills and pagination metadata for an owned branch."""
+    """Return searchable, date-filtered bill history for an owned branch."""
     get_owned_branch(db, branch_id, current_user)
+
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(
+            status_code=422,
+            detail="start_date cannot be after end_date.",
+        )
 
     query = db.query(Bill).filter(Bill.branch_id == branch_id)
 
+    # Search bill number, order number, or customer name.
     if search and search.strip():
         term = f"%{search.strip()}%"
         query = query.join(Order, Bill.order_id == Order.id).filter(
@@ -129,18 +140,43 @@ def list_bills_paginated(
             | (Order.customer_name.ilike(term))
         )
 
+    # Payment status.
     if payment_status and payment_status.lower() != "all":
         query = query.filter(
-            Bill.payment_status == payment_status.lower()
+            Bill.payment_status == payment_status.strip().lower()
         )
+
+    # Payment method.
+    if payment_method and payment_method.lower() != "all":
+        query = query.filter(
+            func.lower(Bill.payment_method)
+            == payment_method.strip().lower()
+        )
+
+    # Bill creation date range, interpreted as UTC.
+    if start_date:
+        start_datetime = datetime.combine(
+            start_date,
+            time.min,
+            tzinfo=timezone.utc,
+        )
+        query = query.filter(Bill.created_at >= start_datetime)
+
+    if end_date:
+        end_datetime = datetime.combine(
+            end_date + timedelta(days=1),
+            time.min,
+            tzinfo=timezone.utc,
+        )
+        query = query.filter(Bill.created_at < end_datetime)
 
     total = query.with_entities(func.count(Bill.id)).scalar() or 0
 
+    matching_ids = query.with_entities(Bill.id)
+
     bills = (
         bill_query(db)
-        .filter(Bill.id.in_(
-            query.with_entities(Bill.id)
-        ))
+        .filter(Bill.id.in_(matching_ids))
         .order_by(Bill.created_at.desc(), Bill.id.desc())
         .offset(offset)
         .limit(limit)

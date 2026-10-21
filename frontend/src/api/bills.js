@@ -66,12 +66,23 @@ export async function getBranchBillAnalytics(
 }
 
 // Get one page of bills with optional server-side filters
+
+/**
+ * Get one page of bills with server-side search and filters.
+ *
+ * Supported filters:
+ * - search: bill number, order number, or customer name
+ * - paymentStatus: unpaid, paid, pending, refunded, or all
+ * - paymentMethod: cash, UPI, card, or all
+ * - startDate / endDate: YYYY-MM-DD
+ */
 export async function getBranchBillsPage(
     branchId,
     limit = 20,
     offset = 0,
     search = "",
     paymentStatus = "all",
+    filters = {},
 ) {
     const params = {
         limit,
@@ -87,7 +98,24 @@ export async function getBranchBillsPage(
         paymentStatus.trim() &&
         paymentStatus.toLowerCase() !== "all"
     ) {
-        params.payment_status = paymentStatus.toLowerCase();
+        params.payment_status = paymentStatus.trim().toLowerCase();
+    }
+
+    const paymentMethod = filters.paymentMethod;
+    if (
+        typeof paymentMethod === "string" &&
+        paymentMethod.trim() &&
+        paymentMethod.toLowerCase() !== "all"
+    ) {
+        params.payment_method = paymentMethod.trim().toLowerCase();
+    }
+
+    if (typeof filters.startDate === "string" && filters.startDate.trim()) {
+        params.start_date = filters.startDate.trim();
+    }
+
+    if (typeof filters.endDate === "string" && filters.endDate.trim()) {
+        params.end_date = filters.endDate.trim();
     }
 
     const response = await api.get(
@@ -97,6 +125,7 @@ export async function getBranchBillsPage(
 
     return response.data;
 }
+
 
 // Get all bills by fetching every page.
 // Used for full-branch exports rather than the current page only.
