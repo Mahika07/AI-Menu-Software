@@ -1,12 +1,14 @@
-
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.dependencies import get_current_user
 from app.database.connection import get_db
+from app.models.bill import Bill
 from app.models.branch import Branch
 from app.models.customer import Customer
+from app.models.order import Order
 from app.models.restaurant import Restaurant
 from app.models.user import User
 from app.schemas.customer import (
@@ -14,10 +16,8 @@ from app.schemas.customer import (
     CustomerResponse,
     CustomerUpdate,
 )
-from sqlalchemy.orm import selectinload
 
-from app.models.bill import Bill
-from app.models.order import Order
+
 router = APIRouter(
     prefix="/branches/{branch_id}/customers",
     tags=["Customers"],
@@ -52,6 +52,111 @@ def normalize_phone(phone: str) -> str:
     return phone.strip()
 
 
+def link_historical_orders(
+    db: Session,
+    branch_id: int,
+    customer: Customer,
+) -> None:
+    """
+    Link unassociated historical orders to a customer by exact phone
+    number, restricted to the same branch.
+    """
+    if not customer.phone:
+        return
+
+    (
+        db.query(Order)
+        .filter(
+            Order.branch_id == branch_id,
+            Order.customer_id.is_(None),
+            Order.customer_number == customer.phone,
+        )
+        .update(
+            {Order.customer_id: customer.id},
+            synchronize_session=False,
+        )
+    )
+
+
+def get_or_create_customer_from_order(
+    db: Session,
+    branch_id: int,
+    phone: str,
+) -> Customer | None:
+    """
+    Find or create a saved customer for a historical order phone.
+    The caller must already have verified branch ownership.
+    """
+    phone = normalize_phone(phone)
+
+    if not phone:
+        return None
+
+    customer = (
+        db.query(Customer)
+        .filter(
+            Customer.branch_id == branch_id,
+            Customer.phone == phone,
+        )
+        .first()
+    )
+
+    if customer is None:
+        historical_order = (
+            db.query(Order)
+            .filter(
+                Order.branch_id == branch_id,
+                Order.customer_number == phone,
+                Order.customer_name.is_not(None),
+            )
+            .order_by(Order.created_at.asc(), Order.id.asc())
+            .first()
+        )
+
+        if historical_order is None:
+            return None
+
+        customer_name = (
+            historical_order.customer_name.strip()
+            if historical_order.customer_name
+            else ""
+        )
+
+        customer = Customer(
+            branch_id=branch_id,
+            name=customer_name or "Customer",
+            phone=phone,
+        )
+
+        db.add(customer)
+
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+
+            customer = (
+                db.query(Customer)
+                .filter(
+                    Customer.branch_id == branch_id,
+                    Customer.phone == phone,
+                )
+                .first()
+            )
+
+            if customer is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Unable to resolve this customer. "
+                        "Please retry."
+                    ),
+                )
+
+    link_historical_orders(db, branch_id, customer)
+    return customer
+
+
 @router.post(
     "",
     response_model=CustomerResponse,
@@ -64,26 +169,57 @@ def create_customer(
     db: Session = Depends(get_db),
 ):
     branch = get_owned_branch(branch_id, current_user, db)
+    phone = normalize_phone(payload.phone)
+
+    existing = (
+        db.query(Customer)
+        .filter(
+            Customer.branch_id == branch.id,
+            Customer.phone == phone,
+        )
+        .first()
+    )
+
+    if existing is not None:
+        link_historical_orders(db, branch.id, existing)
+
+        try:
+            db.commit()
+            db.refresh(existing)
+            return existing
+        except Exception:
+            db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail="Unable to update customer order links.",
+            )
 
     customer = Customer(
         branch_id=branch.id,
         name=payload.name,
-        phone=normalize_phone(payload.phone),
+        phone=phone,
         email=str(payload.email) if payload.email else None,
         notes=payload.notes,
     )
 
     try:
         db.add(customer)
+        db.flush()
+        link_historical_orders(db, branch.id, customer)
         db.commit()
         db.refresh(customer)
         return customer
+
     except IntegrityError:
         db.rollback()
         raise HTTPException(
             status_code=409,
-            detail="A customer with this mobile number already exists in this branch.",
+            detail=(
+                "A customer with this mobile number already "
+                "exists in this branch."
+            ),
         )
+
     except Exception:
         db.rollback()
         raise
@@ -104,12 +240,54 @@ def list_customers(
         Customer.branch_id == branch.id,
     )
 
-    if search and search.strip():
-        term = f"%{search.strip()}%"
+    term = search.strip() if search else ""
+
+    if term:
+        pattern = f"%{term}%"
+
+        # Search saved customers and matching unlinked historical orders.
+        matching_orders = (
+            db.query(Order.customer_number)
+            .filter(
+                Order.branch_id == branch.id,
+                Order.customer_id.is_(None),
+                Order.customer_number.is_not(None),
+                or_(
+                    Order.customer_name.ilike(pattern),
+                    Order.customer_number.ilike(pattern),
+                ),
+            )
+            .distinct()
+            .all()
+        )
+
+        historical_phones = [
+            row[0]
+            for row in matching_orders
+            if row[0] and row[0].strip()
+        ]
+
+        if historical_phones:
+            for phone in historical_phones:
+                get_or_create_customer_from_order(
+                    db,
+                    branch.id,
+                    phone,
+                )
+
+            db.commit()
+
+            # Rebuild query after importing matching historical customers.
+            query = db.query(Customer).filter(
+                Customer.branch_id == branch.id,
+            )
+
         query = query.filter(
-            Customer.name.ilike(term)
-            | Customer.phone.ilike(term)
-            | Customer.email.ilike(term)
+            or_(
+                Customer.name.ilike(pattern),
+                Customer.phone.ilike(pattern),
+                Customer.email.ilike(pattern),
+            )
         )
 
     return (
@@ -192,24 +370,34 @@ def update_customer(
             detail="Customer mobile number cannot be null.",
         )
 
+    if "phone" in changes:
+        changes["phone"] = normalize_phone(changes["phone"])
+
     for field, value in changes.items():
         if field == "email" and value is not None:
             value = str(value)
+
         setattr(customer, field, value)
 
     try:
         db.commit()
         db.refresh(customer)
         return customer
+
     except IntegrityError:
         db.rollback()
         raise HTTPException(
             status_code=409,
-            detail="A customer with this mobile number already exists in this branch.",
+            detail=(
+                "A customer with this mobile number already "
+                "exists in this branch."
+            ),
         )
+
     except Exception:
         db.rollback()
         raise
+
 
 @router.get("/{customer_id}/history")
 def get_customer_history(
@@ -241,6 +429,17 @@ def get_customer_history(
             detail="Customer not found.",
         )
 
+    # Repair any historical links whenever customer history is opened.
+    try:
+        link_historical_orders(db, branch.id, customer)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to link historical customer orders.",
+        )
+
     orders = (
         db.query(Order)
         .options(selectinload(Order.items))
@@ -255,6 +454,7 @@ def get_customer_history(
     order_ids = [order.id for order in orders]
 
     bills = []
+
     if order_ids:
         bills = (
             db.query(Bill)
