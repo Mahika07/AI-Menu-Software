@@ -1,7 +1,7 @@
 
 import re
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from app.schemas.order import OrderCreate
 
@@ -31,3 +31,9 @@ class POSOrderCreate(OrderCreate):
             )
 
         return value
+
+    @model_validator(mode="after")
+    def validate_saved_customer_details(self):
+        # A saved customer supplies their name and phone number
+        # from the database. The route verifies branch ownership.
+        return self

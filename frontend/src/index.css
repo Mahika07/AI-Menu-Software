@@ -11751,3 +11751,49 @@ select:focus-visible {
     flex-direction: column;
   }
 }
+
+.transaction-amounts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #e8edf1;
+}
+
+.transaction-amounts>div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.transaction-amounts span,
+.transaction-paid-at {
+  color: #687482;
+  font-size: 0.82rem;
+}
+
+.transaction-amounts strong {
+  overflow-wrap: anywhere;
+}
+
+.transaction-grand-total {
+  padding-left: 12px;
+  border-left: 2px solid #d8e2ea;
+}
+
+.transaction-grand-total strong {
+  color: #14344a;
+  font-size: 1.05rem;
+}
+
+.transaction-paid-at {
+  margin: 14px 0 0;
+}
+
+@media (max-width: 700px) {
+  .transaction-amounts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

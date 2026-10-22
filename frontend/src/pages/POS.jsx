@@ -21,6 +21,7 @@ import { getDishes } from "../api/dishes";
 import { getCategories } from "../api/categories";
 import { getTables } from "../api/tables";
 import { createPOSOrder } from "../api/pos";
+import { createCustomer, getCustomers } from "../api/customers";
 import { createBill, markBillPaid } from "../api/bills";
 import { getBranchOrders } from "../api/orders";
 
@@ -57,6 +58,11 @@ export default function POS() {
   const [customerName, setCustomerName] = useState("");
   const [customerNumber, setCustomerNumber] = useState("");
   const [customerNote, setCustomerNote] = useState("");
+  const [customerId, setCustomerId] = useState(null);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [customerResults, setCustomerResults] = useState([]);
+  const [customerSearchLoading, setCustomerSearchLoading] = useState(false);
+  const [customerSaving, setCustomerSaving] = useState(false);
 
   const [discount, setDiscount] = useState("0");
   const [taxRate, setTaxRate] = useState("0");
@@ -123,6 +129,91 @@ export default function POS() {
       cancelled = true;
     };
   }, []);
+
+  // Search saved customers only within the currently selected branch.
+  useEffect(() => {
+    if (!branchId || !customerSearch.trim()) {
+      setCustomerResults([]);
+      setCustomerSearchLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setCustomerSearchLoading(true);
+      try {
+        const rows = await getCustomers(branchId, {
+          search: customerSearch.trim(),
+          limit: 10,
+          offset: 0,
+        });
+        const customers = Array.isArray(rows)
+          ? rows
+          : Array.isArray(rows?.items)
+            ? rows.items
+            : Array.isArray(rows?.customers)
+              ? rows.customers
+              : [];
+        if (!cancelled) setCustomerResults(customers);
+      } catch {
+        if (!cancelled) setCustomerResults([]);
+      } finally {
+        if (!cancelled) setCustomerSearchLoading(false);
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [branchId, customerSearch]);
+
+  function selectCustomer(customer) {
+    setCustomerId(customer.id);
+    setCustomerName(customer.name || "");
+    setCustomerNumber(String(customer.phone || "").replace(/\D/g, "").slice(0, 10));
+    setCustomerSearch(customer.name || customer.phone || "");
+    setCustomerResults([]);
+    setNotice(`Selected saved customer: ${customer.name}.`);
+    setError("");
+  }
+
+  async function saveCurrentCustomer() {
+    if (!branchId) return;
+    const normalizedPhone = customerNumber.replace(/\D/g, "");
+    if (!customerName.trim()) {
+      setError("Enter the customer's name before saving the customer record.");
+      return;
+    }
+    if (!/^[6-9]\d{9}$/.test(normalizedPhone)) {
+      setError("Enter a valid 10-digit Indian mobile number before saving.");
+      return;
+    }
+
+    setCustomerSaving(true);
+    setError("");
+    try {
+      const customer = await createCustomer(branchId, {
+        name: customerName.trim(),
+        phone: normalizedPhone,
+      });
+      setCustomerId(customer.id);
+      setCustomerSearch(customer.name || customerName.trim());
+      setCustomerResults([]);
+      setNotice(`Customer ${customer.name || customerName.trim()} saved successfully.`);
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      setError(
+        err.response?.status === 409
+          ? "A customer with this mobile number already exists in this branch. Search and select that customer."
+          : typeof detail === "string"
+            ? detail
+            : "Could not save this customer. Please try again.",
+      );
+    } finally {
+      setCustomerSaving(false);
+    }
+  }
 
   // Load menu, tables and recent orders for the selected branch.
   const refreshBranchData = useCallback(async () => {
@@ -388,6 +479,7 @@ export default function POS() {
       // The backend must calculate authoritative order prices.
       createdOrder = await createPOSOrder(branchId, {
         ...(tableId ? { table_id: Number(tableId) } : {}),
+        ...(customerId ? { customer_id: customerId } : {}),
         customer_name: customerName.trim() || null,
         customer_number: normalizedCustomerNumber,
         customer_note: customerNote.trim() || null,
@@ -410,6 +502,9 @@ export default function POS() {
       setCustomerName("");
       setCustomerNumber("");
       setCustomerNote("");
+      setCustomerId(null);
+      setCustomerSearch("");
+      setCustomerResults([]);
       setDiscount("0");
       setTaxRate("0");
       setTableId("");
@@ -496,6 +591,9 @@ export default function POS() {
 
               setCart([]);
               setTableId("");
+              setCustomerId(null);
+              setCustomerSearch("");
+              setCustomerResults([]);
               setError("");
               setNotice("");
             }}
@@ -660,11 +758,56 @@ export default function POS() {
               </span>
             </label>
 
+            <div className="pos-field">
+              <span>Find saved customer</span>
+              <div className="pos-search">
+                <Search size={16} />
+                <input
+                  value={customerSearch}
+                  onChange={(event) => {
+                    setCustomerSearch(event.target.value);
+                    setCustomerId(null);
+                    setNotice("");
+                  }}
+                  placeholder="Search name, phone, or email…"
+                  autoComplete="off"
+                  aria-label="Search saved customers"
+                />
+              </div>
+              {customerSearchLoading && (
+                <small className="pos-field-help">Searching customers…</small>
+              )}
+              {!customerSearchLoading && customerSearch.trim() && customerResults.length > 0 && (
+                <div className="pos-customer-results" role="listbox" aria-label="Customer search results">
+                  {customerResults.map((customer) => (
+                    <button
+                      key={customer.id}
+                      className="pos-customer-result"
+                      type="button"
+                      onClick={() => selectCustomer(customer)}
+                    >
+                      <strong>{customer.name}</strong>
+                      <span>{customer.phone}{customer.email ? ` · ${customer.email}` : ""}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {!customerSearchLoading && customerSearch.trim() && !customerResults.length && (
+                <small className="pos-field-help">No saved customer found. You can enter their details below and save them.</small>
+              )}
+              {customerId && (
+                <small className="pos-field-help">Saved customer selected — this order will be linked to their history.</small>
+              )}
+            </div>
+
             <label className="pos-field">
               <span>Customer name (optional)</span>
               <input
                 value={customerName}
-                onChange={(event) => setCustomerName(event.target.value)}
+                onChange={(event) => {
+                  setCustomerName(event.target.value);
+                  setCustomerId(null);
+                }}
                 maxLength={100}
                 placeholder="Customer name"
               />
@@ -677,11 +820,10 @@ export default function POS() {
                 inputMode="numeric"
                 autoComplete="tel-national"
                 value={customerNumber}
-                onChange={(event) =>
-                  setCustomerNumber(
-                    event.target.value.replace(/\D/g, "").slice(0, 10),
-                  )
-                }
+                onChange={(event) => {
+                  setCustomerNumber(event.target.value.replace(/\D/g, "").slice(0, 10));
+                  setCustomerId(null);
+                }}
                 placeholder="10-digit mobile number"
                 required
                 minLength={10}
@@ -694,6 +836,17 @@ export default function POS() {
                 Required for every POS order.
               </small>
             </label>
+
+            {!customerId && customerName.trim() && /^[6-9]\d{9}$/.test(customerNumber) && (
+              <button
+                className="pos-link-button"
+                type="button"
+                onClick={saveCurrentCustomer}
+                disabled={customerSaving}
+              >
+                {customerSaving ? "Saving customer…" : "Save as a customer record"}
+              </button>
+            )}
 
             <label className="pos-field">
               <span>Order note (optional)</span>

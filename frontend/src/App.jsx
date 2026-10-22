@@ -25,7 +25,7 @@ import Profile from "./pages/Profile";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import POS from "./pages/POS";
-
+import Reports from "./pages/Reports";
 function ProtectedLayout({ children }) {
   return (
     <ProtectedRoute>
@@ -220,6 +220,15 @@ function App() {
           element={
             <ProtectedLayout>
               <POS />
+            </ProtectedLayout>
+          }
+        />
+        {/* POS Reports */}
+        <Route
+          path="/dashboard/reports"
+          element={
+            <ProtectedLayout>
+              <Reports />
             </ProtectedLayout>
           }
         />

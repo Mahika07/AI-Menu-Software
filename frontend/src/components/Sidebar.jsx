@@ -14,6 +14,7 @@ import {
   Wallet,
   X,
   Monitor,
+  FileBarChart,
 } from "lucide-react";
 
 import { getRestaurants } from "../api/restaurants";
@@ -37,6 +38,11 @@ const navigationItems = [
     label: "Revenue Analytics",
     path: "/dashboard/revenue-analytics",
     icon: Wallet,
+  },
+  {
+    label: "POS Reports",
+    path: "/dashboard/reports",
+    icon: FileBarChart,
   },
   {
     label: "Point of Sale",

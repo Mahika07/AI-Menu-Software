@@ -25,11 +25,11 @@ import {
   getBranchOrderHistory,
   updateOrderStatus,
 } from "../api/orders";
-import { getBranchBills } from "../api/bills";
+import { getBranchBills, getBranchTransactionHistory } from "../api/bills";
 import GenerateBillModal from "../components/GenerateBillModal";
 
 const HISTORY_PAGE_SIZE = 20;
-
+const TRANSACTION_PAGE_SIZE = 20;
 const STATUS_LABELS = {
   pending: "Pending",
   confirmed: "Confirmed",
@@ -283,6 +283,19 @@ function Orders() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyError, setHistoryError] = useState("");
 
+  const [transactions, setTransactions] = useState([]);
+  const [transactionSearch, setTransactionSearch] = useState("");
+  const [transactionPaymentStatus, setTransactionPaymentStatus] =
+    useState("all");
+  const [transactionPaymentMethod, setTransactionPaymentMethod] =
+    useState("all");
+  const [transactionStartDate, setTransactionStartDate] = useState("");
+  const [transactionEndDate, setTransactionEndDate] = useState("");
+  const [transactionPage, setTransactionPage] = useState(0);
+  const [transactionTotal, setTransactionTotal] = useState(0);
+  const [loadingTransactions, setLoadingTransactions] = useState(false);
+  const [transactionError, setTransactionError] = useState("");
+
   // Load restaurants.
   useEffect(() => {
     let cancelled = false;
@@ -434,7 +447,51 @@ function Orders() {
     historyEndDate,
     historyPage,
   ]);
+  const loadTransactionHistory = useCallback(async () => {
+    if (!branchId) {
+      setTransactions([]);
+      setTransactionTotal(0);
+      return;
+    }
 
+    try {
+      setLoadingTransactions(true);
+      setTransactionError("");
+
+      const result = await getBranchTransactionHistory(branchId, {
+        search: transactionSearch,
+        paymentStatus: transactionPaymentStatus,
+        paymentMethod: transactionPaymentMethod,
+        startDate: transactionStartDate,
+        endDate: transactionEndDate,
+        limit: TRANSACTION_PAGE_SIZE,
+        offset: transactionPage * TRANSACTION_PAGE_SIZE,
+      });
+
+      setTransactions(Array.isArray(result.items) ? result.items : []);
+      setTransactionTotal(Number(result.total || 0));
+    } catch (err) {
+      setTransactionError(
+        err.response?.data?.detail || "Unable to load transaction history.",
+      );
+    } finally {
+      setLoadingTransactions(false);
+    }
+  }, [
+    branchId,
+    transactionSearch,
+    transactionPaymentStatus,
+    transactionPaymentMethod,
+    transactionStartDate,
+    transactionEndDate,
+    transactionPage,
+  ]);
+
+  useEffect(() => {
+    if (activeTab === "transactions") {
+      loadTransactionHistory();
+    }
+  }, [activeTab, loadTransactionHistory]);
   useEffect(() => {
     if (activeTab === "history") {
       loadOrderHistory();
@@ -626,6 +683,8 @@ function Orders() {
           onClick={() => {
             if (activeTab === "history") {
               loadOrderHistory();
+            } else if (activeTab === "transactions") {
+              loadTransactionHistory();
             } else {
               loadOrders(true);
               loadBills(true);
@@ -635,7 +694,9 @@ function Orders() {
             !branchId ||
             (activeTab === "history"
               ? loadingHistory
-              : loadingOrders || loadingBills)
+              : activeTab === "transactions"
+                ? loadingTransactions
+                : loadingOrders || loadingBills)
           }
         >
           <RefreshCw size={17} />
@@ -670,6 +731,7 @@ function Orders() {
             onChange={(event) => {
               setBranchId(event.target.value);
               setHistoryPage(0);
+              setTransactionPage(0);
             }}
             disabled={loadingBranches || branches.length === 0}
           >
@@ -710,6 +772,19 @@ function Orders() {
           <History size={17} />
           Order History
           <span className="orders-tab-count">{historyTotal}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "transactions"}
+          className={`orders-tab ${
+            activeTab === "transactions" ? "active" : ""
+          }`}
+          onClick={() => setActiveTab("transactions")}
+        >
+          <ReceiptText size={17} />
+          Transaction History
+          <span className="orders-tab-count">{transactionTotal}</span>
         </button>
       </div>
 
@@ -1202,6 +1277,270 @@ function Orders() {
                 (historyPage + 1) * HISTORY_PAGE_SIZE >= historyTotal
               }
               onClick={() => setHistoryPage((page) => page + 1)}
+            >
+              Next
+              <ChevronRight size={17} />
+            </button>
+          </div>
+        </section>
+      )}
+
+      {activeTab === "transactions" && (
+        <section className="order-history transaction-history">
+          <div className="order-history-heading">
+            <div>
+              <h2>Transaction History</h2>
+              <p>
+                Search bills, check payment status, and review branch
+                transactions.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={loadTransactionHistory}
+              disabled={!branchId || loadingTransactions}
+            >
+              <RefreshCw size={16} />
+              Refresh
+            </button>
+          </div>
+
+          {transactionError && (
+            <div className="error-message" role="alert">
+              <AlertCircle size={18} />
+              {transactionError}
+            </div>
+          )}
+
+          <div className="order-history-filters">
+            <label>
+              Search bills
+              <div className="order-history-search">
+                <Search size={17} />
+                <input
+                  type="search"
+                  maxLength={100}
+                  placeholder="Bill number, order number, customer"
+                  value={transactionSearch}
+                  onChange={(event) => {
+                    setTransactionSearch(event.target.value);
+                    setTransactionPage(0);
+                  }}
+                />
+              </div>
+            </label>
+
+            <label>
+              Payment status
+              <select
+                value={transactionPaymentStatus}
+                onChange={(event) => {
+                  setTransactionPaymentStatus(event.target.value);
+                  setTransactionPage(0);
+                }}
+              >
+                <option value="all">All statuses</option>
+                <option value="paid">Paid</option>
+                <option value="unpaid">Unpaid</option>
+                <option value="pending">Pending</option>
+                <option value="refunded">Refunded</option>
+              </select>
+            </label>
+
+            <label>
+              Payment method
+              <select
+                value={transactionPaymentMethod}
+                onChange={(event) => {
+                  setTransactionPaymentMethod(event.target.value);
+                  setTransactionPage(0);
+                }}
+              >
+                <option value="all">All methods</option>
+                <option value="cash">Cash</option>
+                <option value="upi">UPI</option>
+                <option value="card">Card</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+
+            <label>
+              From date
+              <input
+                type="date"
+                value={transactionStartDate}
+                max={transactionEndDate || undefined}
+                onChange={(event) => {
+                  setTransactionStartDate(event.target.value);
+                  setTransactionPage(0);
+                }}
+              />
+            </label>
+
+            <label>
+              To date
+              <input
+                type="date"
+                value={transactionEndDate}
+                min={transactionStartDate || undefined}
+                onChange={(event) => {
+                  setTransactionEndDate(event.target.value);
+                  setTransactionPage(0);
+                }}
+              />
+            </label>
+
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => {
+                setTransactionSearch("");
+                setTransactionPaymentStatus("all");
+                setTransactionPaymentMethod("all");
+                setTransactionStartDate("");
+                setTransactionEndDate("");
+                setTransactionPage(0);
+              }}
+            >
+              Clear filters
+            </button>
+          </div>
+
+          <div className="order-history-summary">
+            <span>
+              {transactionTotal} {transactionTotal === 1 ? "bill" : "bills"}{" "}
+              found
+            </span>
+            <span>Page {transactionPage + 1}</span>
+          </div>
+
+          {!branchId ? (
+            <div className="empty-state">
+              <ReceiptText size={38} />
+              <h2>No branch selected</h2>
+              <p>Select a branch to view its transactions.</p>
+            </div>
+          ) : loadingTransactions ? (
+            <div className="loading">Loading transaction history...</div>
+          ) : transactions.length === 0 ? (
+            <div className="empty-state">
+              <ReceiptText size={38} />
+              <h2>No matching transactions</h2>
+              <p>Try changing your search or filters.</p>
+            </div>
+          ) : (
+            <div className="order-history-list">
+              {transactions.map((bill) => {
+                const order = bill.order || {};
+                const paymentStatus = String(
+                  bill.payment_status || "unpaid",
+                ).toLowerCase();
+
+                return (
+                  <article
+                    className="order-history-card transaction-card"
+                    key={bill.id}
+                  >
+                    <div className="order-history-card-top">
+                      <div>
+                        <strong>
+                          Bill {bill.bill_number || `#${bill.id}`}
+                        </strong>
+                        <p>{formatDate(bill.created_at)}</p>
+                      </div>
+
+                      <span
+                        className={`order-status-badge status-${paymentStatus}`}
+                      >
+                        {paymentStatus.charAt(0).toUpperCase() +
+                          paymentStatus.slice(1)}
+                      </span>
+                    </div>
+
+                    <div className="order-history-card-details">
+                      <span>
+                        Order: {order.order_number || `#${bill.order_id}`}
+                      </span>
+                      <span>Customer: {order.customer_name || "Walk-in"}</span>
+                      <span>
+                        Method: {bill.payment_method || "Not recorded"}
+                      </span>
+                    </div>
+
+                    <div className="transaction-amounts">
+                      <div>
+                        <span>Subtotal</span>
+                        <strong>{formatMoney(bill.subtotal)}</strong>
+                      </div>
+                      <div>
+                        <span>Discount</span>
+                        <strong>−{formatMoney(bill.discount_amount)}</strong>
+                      </div>
+                      <div>
+                        <span>Tax</span>
+                        <strong>{formatMoney(bill.tax_amount)}</strong>
+                      </div>
+                      <div className="transaction-grand-total">
+                        <span>Bill total</span>
+                        <strong>{formatMoney(bill.total_amount)}</strong>
+                      </div>
+                    </div>
+
+                    {bill.paid_at && (
+                      <p className="transaction-paid-at">
+                        Paid at: {formatDate(bill.paid_at)}
+                      </p>
+                    )}
+
+                    <div className="order-history-actions">
+                      <button
+                        type="button"
+                        className="primary-button"
+                        onClick={() => handleViewBill(bill, order)}
+                      >
+                        <ExternalLink size={16} />
+                        View Bill
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="order-history-pagination">
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={transactionPage === 0 || loadingTransactions}
+              onClick={() =>
+                setTransactionPage((page) => Math.max(0, page - 1))
+              }
+            >
+              <ChevronLeft size={17} />
+              Previous
+            </button>
+
+            <span>
+              {transactionTotal === 0
+                ? "0 bills"
+                : `${transactionPage * TRANSACTION_PAGE_SIZE + 1}–${Math.min(
+                    (transactionPage + 1) * TRANSACTION_PAGE_SIZE,
+                    transactionTotal,
+                  )} of ${transactionTotal}`}
+            </span>
+
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={
+                loadingTransactions ||
+                (transactionPage + 1) * TRANSACTION_PAGE_SIZE >=
+                  transactionTotal
+              }
+              onClick={() => setTransactionPage((page) => page + 1)}
             >
               Next
               <ChevronRight size={17} />

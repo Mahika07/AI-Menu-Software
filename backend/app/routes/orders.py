@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.rate_limit import limiter
 from app.database.connection import get_db
 from app.models.branch import Branch
+from app.models.customer import Customer
 from app.models.dining_session import DiningSession
 from app.models.dish import Dish
 from app.models.order import Order, OrderItem
@@ -22,7 +23,6 @@ from app.schemas.order import (
 router = APIRouter(prefix="/public", tags=["Public Orders"])
 
 CENT = Decimal("0.01")
-# expires_at is retained for schema compatibility; closure is staff-controlled.
 SESSION_DURATION = timedelta(days=36500)
 ACTIVE_ORDER_STATUSES = ["pending", "confirmed", "preparing", "ready"]
 
@@ -112,7 +112,7 @@ def create_dining_session(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """Create a new private browser dining session for an active table."""
+    """Create a private browser dining session for an active table."""
     table, _branch = get_active_table_and_branch(qr_token, db)
 
     session = DiningSession(
@@ -158,6 +158,31 @@ def create_public_order(
         db,
     )
 
+    # A customer ID is never trusted without checking this branch.
+    customer = None
+
+    if payload.customer_id is not None:
+        customer = (
+            db.query(Customer)
+            .filter(
+                Customer.id == payload.customer_id,
+                Customer.branch_id == branch.id,
+            )
+            .first()
+        )
+
+        if customer is None:
+            raise HTTPException(
+                status_code=422,
+                detail="The selected customer was not found in this branch.",
+            )
+
+        customer_name = customer.name
+        customer_number = customer.phone
+    else:
+        customer_name = payload.customer_name
+        customer_number = payload.customer_number
+
     requested_ids = [item.dish_id for item in payload.items]
 
     dishes = (
@@ -186,7 +211,7 @@ def create_public_order(
 
     for requested_item in payload.items:
         dish = dishes_by_id[requested_item.dish_id]
-        unit_price = money(Decimal(dish.price))
+        unit_price = money(Decimal(str(dish.price)))
         line_total = money(unit_price * requested_item.quantity)
         subtotal += line_total
 
@@ -206,11 +231,13 @@ def create_public_order(
 
     order = Order(
         branch_id=branch.id,
+        customer_id=customer.id if customer else None,
         table_id=table.id,
         table_number=table.table_number,
         dining_session_id=dining_session.id,
         status="pending",
-        customer_name=payload.customer_name,
+        customer_name=customer_name,
+        customer_number=customer_number,
         customer_note=payload.customer_note,
         subtotal=subtotal,
         total_amount=subtotal,
@@ -225,7 +252,10 @@ def create_public_order(
         return (
             db.query(Order)
             .options(selectinload(Order.items))
-            .filter(Order.id == order.id)
+            .filter(
+                Order.id == order.id,
+                Order.branch_id == branch.id,
+            )
             .one()
         )
     except Exception:
@@ -243,7 +273,7 @@ def get_public_order_status(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """Track an individual order using its unguessable order number."""
+    """Track an individual order using its order number."""
     order = (
         db.query(Order)
         .options(selectinload(Order.items))
@@ -295,6 +325,7 @@ def get_active_table_orders(
         .all()
     )
 
+
 @router.post(
     "/tables/{qr_token}/orders/{order_number}/items/{item_id}/cancel",
     response_model=PublicOrderStatusResponse,
@@ -312,15 +343,12 @@ def cancel_public_order_item(
     ),
 ):
     """Cancel one pending item belonging to the current dining session."""
-    from sqlalchemy import select
-
     table, branch, dining_session = get_valid_dining_session(
         qr_token,
         x_dining_session_token,
         db,
     )
 
-    # Lock the order while validating and changing the item.
     order = (
         db.query(Order)
         .options(selectinload(Order.items))
@@ -367,7 +395,6 @@ def cancel_public_order_item(
         item.status = "cancelled"
         item.status_updated_at = datetime.now(timezone.utc)
 
-        # Recalculate the amount from items that have not been cancelled.
         remaining_total = money(
             sum(
                 (

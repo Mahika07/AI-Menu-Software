@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.dependencies import get_current_user
 from app.database.connection import get_db
+from app.models.bill import Bill
 from app.models.branch import Branch
+from app.models.customer import Customer
 from app.models.dish import Dish
 from app.models.order import Order, OrderItem
 from app.models.restaurant import Restaurant
@@ -15,12 +17,19 @@ from app.models.table import RestaurantTable
 from app.models.user import User
 from app.schemas.order import OwnerOrderResponse
 from app.schemas.pos import POSOrderCreate
-from app.models.bill import Bill
-router = APIRouter(prefix="/branches/{branch_id}/pos", tags=["POS"])
+
+
+router = APIRouter(
+    prefix="/branches/{branch_id}/pos",
+    tags=["POS"],
+)
 
 
 def money(value: Decimal) -> Decimal:
-    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return value.quantize(
+        Decimal("0.01"),
+        rounding=ROUND_HALF_UP,
+    )
 
 
 def get_owned_branch(
@@ -30,7 +39,10 @@ def get_owned_branch(
 ) -> Branch:
     branch = (
         db.query(Branch)
-        .join(Restaurant, Restaurant.id == Branch.restaurant_id)
+        .join(
+            Restaurant,
+            Restaurant.id == Branch.restaurant_id,
+        )
         .filter(
             Branch.id == branch_id,
             Restaurant.owner_id == current_user.id,
@@ -60,11 +72,42 @@ def create_pos_order(
 ):
     """Create a staff order using server-side menu prices."""
 
-    branch = get_owned_branch(db, branch_id, current_user)
+    branch = get_owned_branch(
+        db,
+        branch_id,
+        current_user,
+    )
+
+    # Resolve saved customers exclusively within the owned branch.
+    customer = None
+
+    if payload.customer_id is not None:
+        customer = (
+            db.query(Customer)
+            .filter(
+                Customer.id == payload.customer_id,
+                Customer.branch_id == branch.id,
+            )
+            .first()
+        )
+
+        if customer is None:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "The selected customer was not found "
+                    "in this branch."
+                ),
+            )
+
+        customer_name = customer.name
+        customer_number = customer.phone
+    else:
+        customer_name = payload.customer_name
+        customer_number = payload.customer_number
 
     table = None
 
-    
     if payload.table_id is not None:
         table = (
             db.query(RestaurantTable)
@@ -72,16 +115,17 @@ def create_pos_order(
                 RestaurantTable.id == payload.table_id,
                 RestaurantTable.branch_id == branch.id,
                 RestaurantTable.is_active.is_(True),
+            )
+            .with_for_update()
+            .first()
         )
-        .with_for_update()
-        .first()
-    )
 
         if table is None:
             raise HTTPException(
                 status_code=422,
                 detail="The selected table is unavailable.",
             )
+
         outstanding_order = (
             db.query(Order.id)
             .outerjoin(
@@ -95,7 +139,7 @@ def create_pos_order(
                 Order.branch_id == branch.id,
                 Order.table_id == table.id,
                 or_(
-                    # A bill exists and payment is not complete.
+                    # A bill exists and payment is incomplete.
                     and_(
                         Bill.id.is_not(None),
                         or_(
@@ -103,10 +147,12 @@ def create_pos_order(
                             Bill.payment_status != "paid",
                         ),
                     ),
-                    # No bill exists, but the order is still active.
+                    # No bill exists, but the order is active.
                     and_(
                         Bill.id.is_(None),
-                        Order.status.notin_(["completed", "cancelled"]),
+                        Order.status.notin_(
+                            ["completed", "cancelled"]
+                        ),
                     ),
                 ),
             )
@@ -122,8 +168,10 @@ def create_pos_order(
                     "table can be used again."
                 ),
             )
-        
-    requested_ids = [item.dish_id for item in payload.items]
+
+    requested_ids = [
+        item.dish_id for item in payload.items
+    ]
 
     dishes = (
         db.query(Dish)
@@ -135,9 +183,14 @@ def create_pos_order(
         .all()
     )
 
-    dishes_by_id = {dish.id: dish for dish in dishes}
+    dishes_by_id = {
+        dish.id: dish for dish in dishes
+    }
 
-    if any(dish_id not in dishes_by_id for dish_id in requested_ids):
+    if any(
+        dish_id not in dishes_by_id
+        for dish_id in requested_ids
+    ):
         raise HTTPException(
             status_code=422,
             detail=(
@@ -152,8 +205,12 @@ def create_pos_order(
     for requested_item in payload.items:
         dish = dishes_by_id[requested_item.dish_id]
 
-        unit_price = money(Decimal(str(dish.price)))
-        line_total = money(unit_price * requested_item.quantity)
+        unit_price = money(
+            Decimal(str(dish.price))
+        )
+        line_total = money(
+            unit_price * requested_item.quantity
+        )
         subtotal += line_total
 
         order_items.append(
@@ -163,7 +220,9 @@ def create_pos_order(
                 quantity=requested_item.quantity,
                 unit_price=unit_price,
                 line_total=line_total,
-                special_instructions=requested_item.special_instructions,
+                special_instructions=(
+                    requested_item.special_instructions
+                ),
                 status="pending",
             )
         )
@@ -172,12 +231,15 @@ def create_pos_order(
 
     order = Order(
         branch_id=branch.id,
+        customer_id=customer.id if customer else None,
         table_id=table.id if table else None,
-        table_number=table.table_number if table else "Takeaway",
+        table_number=(
+            table.table_number if table else "Takeaway"
+        ),
         dining_session_id=None,
         status="pending",
-        customer_name=payload.customer_name,
-        customer_number=payload.customer_number,
+        customer_name=customer_name,
+        customer_number=customer_number,
         customer_note=payload.customer_note,
         subtotal=subtotal,
         total_amount=subtotal,
@@ -192,10 +254,16 @@ def create_pos_order(
         return (
             db.query(Order)
             .options(selectinload(Order.items))
-            .filter(Order.id == order.id)
+            .filter(
+                Order.id == order.id,
+                Order.branch_id == branch.id,
+            )
             .one()
         )
 
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception:
         db.rollback()
         raise HTTPException(

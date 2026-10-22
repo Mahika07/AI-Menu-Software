@@ -746,3 +746,179 @@
 .pos-field select option:disabled {
     color: #9ca3af;
 }
+
+/* Customer records and search in POS checkout */
+.pos-customer-section {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+}
+
+.pos-customer-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 43px;
+    padding: 0 12px;
+    border: 1px solid #dbe2ea;
+    border-radius: 11px;
+    background: #fff;
+    color: #8490a2;
+}
+
+.pos-customer-search:focus-within {
+    border-color: #6478ef;
+    box-shadow: 0 0 0 3px #6478ef1a;
+}
+
+.pos-customer-search input {
+    width: 100%;
+    min-width: 0;
+    min-height: 41px;
+    padding: 0;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: #182234;
+    font: inherit;
+    font-size: 13px;
+    box-shadow: none;
+}
+
+.pos-customer-search input:focus {
+    border: 0;
+    box-shadow: none;
+}
+
+.pos-customer-results {
+    display: grid;
+    gap: 7px;
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 7px;
+    border: 1px solid #e5eaf1;
+    border-radius: 12px;
+    background: #fff;
+}
+
+.pos-customer-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    padding: 11px;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    background: #f8fafc;
+    color: #263248;
+    text-align: left;
+    cursor: pointer;
+}
+
+.pos-customer-option:hover {
+    border-color: #c7d2fe;
+    background: #f0f3ff;
+}
+
+.pos-customer-option:focus-visible,
+.pos-customer-clear:focus-visible,
+.pos-customer-create:focus-visible {
+    outline: 2px solid #6478ef;
+    outline-offset: 2px;
+}
+
+.pos-customer-option-info {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+
+.pos-customer-option-info strong {
+    overflow-wrap: anywhere;
+    font-size: 12px;
+}
+
+.pos-customer-option-info span {
+    overflow-wrap: anywhere;
+    color: #718096;
+    font-size: 11px;
+}
+
+.pos-customer-selected {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 11px 12px;
+    border: 1px solid #a7f3d0;
+    border-radius: 11px;
+    background: #ecfdf5;
+    color: #065f46;
+}
+
+.pos-customer-selected-info {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+
+.pos-customer-selected-info strong {
+    overflow-wrap: anywhere;
+    font-size: 12px;
+}
+
+.pos-customer-selected-info span {
+    overflow-wrap: anywhere;
+    font-size: 11px;
+}
+
+.pos-customer-clear,
+.pos-customer-create {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 34px;
+    padding: 7px 10px;
+    border: 1px solid #dbe2ea;
+    border-radius: 9px;
+    background: #fff;
+    color: #414a8a;
+    font-size: 11px;
+    font-weight: 750;
+    cursor: pointer;
+}
+
+.pos-customer-create {
+    width: 100%;
+    border-color: #d7ddff;
+    background: #f3f5ff;
+}
+
+.pos-customer-create:hover,
+.pos-customer-clear:hover {
+    background: #eef2ff;
+}
+
+.pos-customer-message {
+    margin: 0;
+    color: #718096;
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.pos-customer-message-error {
+    color: #be123c;
+}
+
+@media (max-width: 580px) {
+    .pos-customer-option {
+        padding: 9px;
+    }
+
+    .pos-customer-selected {
+        align-items: flex-start;
+    }
+}

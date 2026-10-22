@@ -42,7 +42,11 @@ class Order(Base):
         nullable=False,
         index=True,
     )
-
+    customer_id: Mapped[int | None] = mapped_column(
+    ForeignKey("customers.id", ondelete="SET NULL"),
+    nullable=True,
+    index=True,
+)
     table_id: Mapped[int | None] = mapped_column(
         ForeignKey("tables.id", ondelete="SET NULL"),
         nullable=True,
@@ -111,7 +115,10 @@ class Order(Base):
 
     branch = relationship("Branch")
     table = relationship("RestaurantTable")
-
+    customer = relationship(
+    "Customer",
+    back_populates="orders",
+)
     dining_session = relationship(
         "DiningSession",
         back_populates="orders",
