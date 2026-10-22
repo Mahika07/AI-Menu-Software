@@ -1,51 +1,32 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
+  Armchair,
+  CheckCircle2,
   RefreshCw,
-  ShieldCheck,
-  Clock3,
-  RotateCcw,
-  LockKeyhole,
+  Users,
+  Ban,
 } from "lucide-react";
-
-import {
-  getDiningSessions,
-  closeDiningSession,
-  resetTableSession,
-} from "../api/diningSessions";
-
-function formatDate(value) {
-  if (!value) return "—";
-
-  const date = new Date(value);
-
-  return Number.isNaN(date.getTime())
-    ? "—"
-    : date.toLocaleString("en-IN", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      });
-}
+import { getTables, updateTable } from "../api/tables";
 
 function DiningSessions() {
   const { restaurantId, branchId } = useParams();
   const navigate = useNavigate();
 
-  const [sessions, setSessions] = useState([]);
+  const [tables, setTables] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState(null);
+  const [busyTableId, setBusyTableId] = useState(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [filter, setFilter] = useState("all");
 
-  const loadSessions = useCallback(async () => {
+  const loadTables = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
 
-      const data = await getDiningSessions(branchId);
-      setSessions(Array.isArray(data) ? data : []);
+      const data = await getTables(branchId);
+      setTables(Array.isArray(data) ? data : []);
     } catch (err) {
       if (err.response?.status === 401) {
         localStorage.removeItem("access_token");
@@ -53,89 +34,76 @@ function DiningSessions() {
         return;
       }
 
-      setError(err.response?.data?.detail || "Unable to load dining sessions.");
+      setError(err.response?.data?.detail || "Unable to load table status.");
     } finally {
       setLoading(false);
     }
   }, [branchId, navigate]);
 
   useEffect(() => {
-    loadSessions();
-  }, [loadSessions]);
+    loadTables();
+  }, [loadTables]);
 
-  const counts = useMemo(() => {
-    const active = sessions.filter((session) => session.is_active).length;
-
-    return {
-      total: sessions.length,
-      active,
-      inactive: sessions.length - active,
-    };
-  }, [sessions]);
-
-  const visibleSessions = useMemo(() => {
-    if (filter === "active") {
-      return sessions.filter((session) => session.is_active);
+  async function setTableStatus(table, occupied) {
+    if (table.is_unavailable || table.is_active === false) {
+      setError(
+        "This table is unavailable. Make it available for service before changing its occupancy.",
+      );
+      return;
     }
 
-    if (filter === "inactive") {
-      return sessions.filter((session) => !session.is_active);
-    }
+    if (table.is_occupied === occupied) return;
 
-    return sessions;
-  }, [sessions, filter]);
-
-  async function handleClose(session) {
-    if (!session.is_active) return;
+    const action = occupied ? "mark occupied" : "mark available";
 
     if (
       !window.confirm(
-        `Close the dining session for Table ${session.table_id}? This prevents this session from placing new orders.`,
+        `Are you sure you want to ${action} Table ${table.table_number}?`,
       )
     ) {
       return;
     }
 
     try {
-      setBusyId(session.id);
+      setBusyTableId(table.id);
       setError("");
       setSuccess("");
 
-      await closeDiningSession(branchId, session.id);
+      const updated = await updateTable(branchId, table.id, {
+        is_occupied: occupied,
+      });
 
-      setSuccess(`Session for Table ${session.table_id} closed.`);
-      await loadSessions();
+      setTables((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+
+      setSuccess(
+        `Table ${table.table_number} marked ${
+          occupied ? "occupied" : "available"
+        }.`,
+      );
     } catch (err) {
-      setError(err.response?.data?.detail || "Unable to close this session.");
+      setError(err.response?.data?.detail || "Unable to update table status.");
+
+      await loadTables();
     } finally {
-      setBusyId(null);
+      setBusyTableId(null);
     }
   }
 
-  async function handleReset(tableId) {
-    if (
-      !window.confirm(
-        `Reset Table ${tableId}? All active sessions for this table will be closed. The next diner will create a new session by scanning the QR code.`,
-      )
-    ) {
-      return;
-    }
+  const availableCount = tables.filter(
+    (table) =>
+      table.is_active !== false && !table.is_unavailable && !table.is_occupied,
+  ).length;
 
-    try {
-      setBusyId(`table-${tableId}`);
-      setError("");
-      setSuccess("");
+  const occupiedCount = tables.filter(
+    (table) =>
+      table.is_active !== false && !table.is_unavailable && table.is_occupied,
+  ).length;
 
-      await resetTableSession(branchId, tableId);
-
-      setSuccess(`Table ${tableId} has been reset.`);
-      await loadSessions();
-    } catch (err) {
-      setError(err.response?.data?.detail || "Unable to reset this table.");
-    } finally {
-      setBusyId(null);
-    }
-  }
+  const unavailableCount = tables.filter(
+    (table) => table.is_unavailable || table.is_active === false,
+  ).length;
 
   return (
     <main className="dining-page">
@@ -153,15 +121,16 @@ function DiningSessions() {
         <div className="dining-heading-row">
           <div>
             <span className="dining-eyebrow">RESTAURANT OPERATIONS</span>
-            <h1>Dining sessions</h1>
+            <h1>Table availability</h1>
             <p>
-              Monitor table sessions and prepare tables for incoming guests.
+              Staff can mark each table available or occupied. Customers do not
+              manage dining sessions.
             </p>
           </div>
 
           <button
             className="dining-refresh"
-            onClick={loadSessions}
+            onClick={loadTables}
             disabled={loading}
           >
             <RefreshCw size={16} />
@@ -173,31 +142,41 @@ function DiningSessions() {
       <section className="dining-stats">
         <article className="dining-stat">
           <span className="dining-stat-icon">
-            <ShieldCheck size={20} />
+            <Armchair size={20} />
           </span>
           <div>
-            <span>Total sessions</span>
-            <strong>{counts.total}</strong>
+            <span>Total tables</span>
+            <strong>{tables.length}</strong>
           </div>
         </article>
 
         <article className="dining-stat">
           <span className="dining-stat-icon active">
-            <Clock3 size={20} />
+            <CheckCircle2 size={20} />
           </span>
           <div>
-            <span>Active sessions</span>
-            <strong>{counts.active}</strong>
+            <span>Available</span>
+            <strong>{availableCount}</strong>
           </div>
         </article>
 
         <article className="dining-stat">
           <span className="dining-stat-icon inactive">
-            <LockKeyhole size={20} />
+            <Users size={20} />
           </span>
           <div>
-            <span>Closed</span>
-            <strong>{counts.inactive}</strong>
+            <span>Occupied</span>
+            <strong>{occupiedCount}</strong>
+          </div>
+        </article>
+
+        <article className="dining-stat">
+          <span className="dining-stat-icon inactive">
+            <Ban size={20} />
+          </span>
+          <div>
+            <span>Unavailable / inactive</span>
+            <strong>{unavailableCount}</strong>
           </div>
         </article>
       </section>
@@ -214,105 +193,108 @@ function DiningSessions() {
         </div>
       )}
 
-      <section className="dining-panel">
-        <div className="dining-panel-heading">
-          <div>
-            <h2>Session history</h2>
-            <p>Recent sessions across this branch.</p>
-          </div>
-
-          <select
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-            aria-label="Filter dining sessions"
-          >
-            <option value="all">All sessions</option>
-            <option value="active">Active only</option>
-            <option value="inactive">Closed</option>
-          </select>
+      {loading ? (
+        <div className="dining-empty">Loading tables…</div>
+      ) : tables.length === 0 ? (
+        <div className="dining-empty">
+          <Armchair size={32} />
+          <strong>No tables configured</strong>
+          <span>Add tables from Tables &amp; QR Codes.</span>
         </div>
+      ) : (
+        <section
+          className="dining-table-cards"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+            gap: 16,
+          }}
+        >
+          {tables.map((table) => {
+            const unavailable =
+              table.is_unavailable || table.is_active === false;
+            const occupied = table.is_occupied;
 
-        {loading ? (
-          <div className="dining-empty">Loading sessions…</div>
-        ) : visibleSessions.length === 0 ? (
-          <div className="dining-empty">
-            <ShieldCheck size={32} />
-            <strong>No sessions found</strong>
-            <span>Try another filter or refresh the list.</span>
-          </div>
-        ) : (
-          <div className="dining-table-wrap">
-            <table className="dining-table">
-              <thead>
-                <tr>
-                  <th>Table</th>
-                  <th>Started</th>
-                  <th>Closure policy</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
+            const tableStatus = unavailable
+              ? "Unavailable"
+              : occupied
+                ? "Occupied"
+                : "Available";
 
-              <tbody>
-                {visibleSessions.map((session) => (
-                  <tr key={session.id}>
-                    <td>
-                      <strong>Table {session.table_id}</strong>
-                      <small>Session #{session.id}</small>
-                    </td>
+            const statusColor = unavailable
+              ? "#d97706"
+              : occupied
+                ? "#dc2626"
+                : "#16a34a";
 
-                    <td>{formatDate(session.created_at)}</td>
-                    <td>Staff closes session</td>
+            return (
+              <article
+                className="dining-stat"
+                key={table.id}
+                style={{
+                  display: "block",
+                  borderTop: `4px solid ${statusColor}`,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 12,
+                  }}
+                >
+                  <div>
+                    <span>TABLE</span>
+                    <h2 style={{ margin: "6px 0" }}>{table.table_number}</h2>
+                    <strong>{tableStatus}</strong>
+                  </div>
 
-                    <td>
-                      <span
-                        className={`dining-badge ${
-                          session.is_active ? "is-active" : "is-inactive"
-                        }`}
-                      >
-                        {session.is_active ? "Active" : "Inactive"}
-                      </span>
-                      {session.closed_at && (
-                        <small>Closed {formatDate(session.closed_at)}</small>
-                      )}
-                    </td>
+                  <Armchair size={26} />
+                </div>
 
-                    <td>
-                      <div className="dining-actions">
-                        {session.is_active && (
-                          <button
-                            className="dining-action close"
-                            onClick={() => handleClose(session)}
-                            disabled={busyId !== null}
-                          >
-                            <LockKeyhole size={14} />
-                            Close
-                          </button>
-                        )}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    marginTop: 18,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <button
+                    className="dining-action"
+                    onClick={() => setTableStatus(table, false)}
+                    disabled={busyTableId !== null || unavailable || !occupied}
+                  >
+                    <CheckCircle2 size={14} />
+                    Mark available
+                  </button>
 
-                        <button
-                          className="dining-action reset"
-                          onClick={() => handleReset(session.table_id)}
-                          disabled={busyId !== null}
-                        >
-                          <RotateCcw size={14} />
-                          Reset table
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+                  <button
+                    className="dining-action close"
+                    onClick={() => setTableStatus(table, true)}
+                    disabled={busyTableId !== null || unavailable || occupied}
+                  >
+                    <Users size={14} />
+                    Mark occupied
+                  </button>
+                </div>
 
-      <p className="dining-footnote">
-        Closing a session blocks further ordering through its token. Existing
-        orders are retained. Resetting a table closes its open sessions and
-        creates a new eight-hour session.
-      </p>
+                {unavailable && (
+                  <small
+                    style={{
+                      display: "block",
+                      marginTop: 12,
+                    }}
+                  >
+                    Change this table's availability in Tables &amp; QR Codes.
+                  </small>
+                )}
+              </article>
+            );
+          })}
+        </section>
+      )}
     </main>
   );
 }

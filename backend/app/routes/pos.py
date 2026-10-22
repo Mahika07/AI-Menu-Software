@@ -1,3 +1,4 @@
+
 from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -66,14 +67,7 @@ def resolve_order_customer(
     customer_name: str | None,
     customer_number: str | None,
 ) -> tuple[Customer | None, str | None, str | None]:
-    """
-    Resolve a customer only within the selected branch.
-
-    Existing customer IDs take precedence. When no customer ID is
-    provided, a phone number is used to find or create a customer.
-    Orders without a phone number can still be placed without linking
-    a customer record.
-    """
+    """Resolve a customer only within the selected branch."""
     if customer_id is not None:
         customer = (
             db.query(Customer)
@@ -88,10 +82,7 @@ def resolve_order_customer(
         if customer is None:
             raise HTTPException(
                 status_code=422,
-                detail=(
-                    "The selected customer was not found "
-                    "in this branch."
-                ),
+                detail="The selected customer was not found in this branch.",
             )
 
         return customer, customer.name, customer.phone
@@ -107,8 +98,6 @@ def resolve_order_customer(
         else None
     )
 
-    # Customer.phone is required by the existing model.
-    # Keep the order's supplied details even when no phone exists.
     if not phone:
         return None, name, None
 
@@ -123,14 +112,11 @@ def resolve_order_customer(
     )
 
     if customer is not None:
-        # Fill in a missing customer name, but don't overwrite
-        # an established name with every new order.
         if name and not customer.name.strip():
             customer.name = name
 
         return customer, customer.name, customer.phone
 
-    # Create a saved customer so future POS searches can find them.
     customer = Customer(
         branch_id=branch_id,
         name=name or "Walk-in Customer",
@@ -140,14 +126,10 @@ def resolve_order_customer(
     db.add(customer)
 
     try:
-        # Flush before creating the order so customer.id is available.
         db.flush()
         return customer, customer.name, customer.phone
 
     except IntegrityError:
-        # Another request may have created this phone number
-        # concurrently. Roll back the failed transaction and
-        # reload the existing record.
         db.rollback()
 
         customer = (
@@ -164,10 +146,7 @@ def resolve_order_customer(
 
         raise HTTPException(
             status_code=409,
-            detail=(
-                "Unable to resolve this customer. "
-                "Please retry the order."
-            ),
+            detail="Unable to resolve this customer. Please retry the order.",
         )
 
 
@@ -183,35 +162,28 @@ def create_pos_order(
     db: Session = Depends(get_db),
 ):
     """Create a staff order using server-side menu prices."""
-
-    branch = get_owned_branch(
-        db,
-        branch_id,
-        current_user,
-    )
-
+    branch = get_owned_branch(db, branch_id, current_user)
     table = None
 
     try:
-        customer, customer_name, customer_number = (
-            resolve_order_customer(
-                db=db,
-                branch_id=branch.id,
-                customer_id=payload.customer_id,
-                customer_name=payload.customer_name,
-                customer_number=payload.customer_number,
-            )
+        customer, customer_name, customer_number = resolve_order_customer(
+            db=db,
+            branch_id=branch.id,
+            customer_id=payload.customer_id,
+            customer_name=payload.customer_name,
+            customer_number=payload.customer_number,
         )
 
         if payload.table_id is not None:
             table = (
                 db.query(RestaurantTable)
                 .filter(
-    RestaurantTable.id == payload.table_id,
-    RestaurantTable.branch_id == branch.id,
-    RestaurantTable.is_active.is_(True),
-    RestaurantTable.is_unavailable.is_(False),
-)
+                    RestaurantTable.id == payload.table_id,
+                    RestaurantTable.branch_id == branch.id,
+                    RestaurantTable.is_active.is_(True),
+                    RestaurantTable.is_unavailable.is_(False),
+                    RestaurantTable.is_occupied.is_(False),
+                )
                 .with_for_update()
                 .first()
             )
@@ -244,9 +216,7 @@ def create_pos_order(
                         ),
                         and_(
                             Bill.id.is_(None),
-                            Order.status.notin_(
-                                ["completed", "cancelled"]
-                            ),
+                            Order.status.notin_(["completed", "cancelled"]),
                         ),
                     ),
                 )
@@ -257,15 +227,12 @@ def create_pos_order(
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=(
-                        "This table is occupied. Its existing order "
-                        "must have a bill marked as paid before the "
-                        "table can be used again."
+                        "This table is occupied. Its existing order must "
+                        "have a bill marked as paid before reuse."
                     ),
                 )
 
-        requested_ids = [
-            item.dish_id for item in payload.items
-        ]
+        requested_ids = [item.dish_id for item in payload.items]
 
         dishes = (
             db.query(Dish)
@@ -277,14 +244,9 @@ def create_pos_order(
             .all()
         )
 
-        dishes_by_id = {
-            dish.id: dish for dish in dishes
-        }
+        dishes_by_id = {dish.id: dish for dish in dishes}
 
-        if any(
-            dish_id not in dishes_by_id
-            for dish_id in requested_ids
-        ):
+        if any(dish_id not in dishes_by_id for dish_id in requested_ids):
             raise HTTPException(
                 status_code=422,
                 detail=(
@@ -298,13 +260,8 @@ def create_pos_order(
 
         for requested_item in payload.items:
             dish = dishes_by_id[requested_item.dish_id]
-
-            unit_price = money(
-                Decimal(str(dish.price))
-            )
-            line_total = money(
-                unit_price * requested_item.quantity
-            )
+            unit_price = money(Decimal(str(dish.price)))
+            line_total = money(unit_price * requested_item.quantity)
             subtotal += line_total
 
             order_items.append(
@@ -314,9 +271,7 @@ def create_pos_order(
                     quantity=requested_item.quantity,
                     unit_price=unit_price,
                     line_total=line_total,
-                    special_instructions=(
-                        requested_item.special_instructions
-                    ),
+                    special_instructions=requested_item.special_instructions,
                     status="pending",
                 )
             )
@@ -327,9 +282,7 @@ def create_pos_order(
             branch_id=branch.id,
             customer_id=customer.id if customer else None,
             table_id=table.id if table else None,
-            table_number=(
-                table.table_number if table else "Takeaway"
-            ),
+            table_number=table.table_number if table else "Takeaway",
             dining_session_id=None,
             status="pending",
             customer_name=customer_name,
@@ -339,6 +292,9 @@ def create_pos_order(
             total_amount=subtotal,
             items=order_items,
         )
+
+        if table is not None:
+            table.is_occupied = True
 
         db.add(order)
         db.commit()

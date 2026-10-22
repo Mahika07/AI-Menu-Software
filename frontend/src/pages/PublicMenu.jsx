@@ -23,7 +23,6 @@ import {
   getOrderStatus,
   getTableOrders,
   getOrCreateDiningSession,
-  startNewDiningSession,
   cancelTableOrderItem,
 } from "../api/orders";
 import DishDetails from "../components/DishDetails";
@@ -146,7 +145,7 @@ function PublicMenu() {
           setTableOrdersError(
             err.response?.data?.detail ||
               err.message ||
-              "Unable to start your dining session. Please try again.",
+              "Ordering is currently unavailable for this table. Please contact restaurant staff.",
           );
         }
       }
@@ -243,7 +242,7 @@ function PublicMenu() {
   }
 
   function addToCart(dish) {
-    if (!dish.is_available) return;
+    if (!dish.is_available || !diningSessionReady) return;
 
     setCart((current) => {
       const existing = current.find((item) => item.dish.id === dish.id);
@@ -426,8 +425,7 @@ function PublicMenu() {
 
     if (!diningSessionReady) {
       setCheckoutError(
-        tableOrdersError ||
-          "Your dining session is not ready. Start a new dining session before placing an order.",
+        "Ordering is currently unavailable for this table. Please contact restaurant staff.",
       );
       return;
     }
@@ -620,32 +618,10 @@ function PublicMenu() {
 
       {tableOrdersError && (
         <section className="table-orders-error" role="alert">
-          <p>{tableOrdersError}</p>
-          <button
-            type="button"
-            className="order-secondary-button"
-            disabled={!qrToken}
-            onClick={async () => {
-              try {
-                setTableOrdersError("");
-                setDiningSessionReady(false);
-
-                await startNewDiningSession(qrToken);
-
-                setTableOrders([]);
-                setDiningSessionReady(true);
-              } catch (err) {
-                setDiningSessionReady(false);
-                setTableOrdersError(
-                  err.response?.data?.detail ||
-                    err.message ||
-                    "Unable to start a new dining session. Please try again.",
-                );
-              }
-            }}
-          >
-            Start new dining session
-          </button>
+          <p>
+            Ordering is currently unavailable for this table. Please contact
+            restaurant staff for assistance.
+          </p>
         </section>
       )}
 
@@ -903,7 +879,7 @@ function PublicMenu() {
                         <button
                           type="button"
                           className="dish-add-button"
-                          disabled={!dish.is_available}
+                          disabled={!dish.is_available || !diningSessionReady}
                           aria-label={`Add ${dish.name} to order`}
                           onClick={(event) => {
                             event.stopPropagation();

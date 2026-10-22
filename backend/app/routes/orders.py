@@ -40,6 +40,7 @@ def get_active_table_and_branch(
         .filter(
             RestaurantTable.qr_token == qr_token,
             RestaurantTable.is_active.is_(True),
+            RestaurantTable.is_unavailable.is_(False),
         )
         .first()
     )
@@ -47,7 +48,10 @@ def get_active_table_and_branch(
     if not table:
         raise HTTPException(
             status_code=404,
-            detail="This table or its QR code is unavailable.",
+            detail=(
+                "This table is unavailable for ordering. "
+                "Please contact restaurant staff."
+            ),
         )
 
     branch = (
@@ -76,7 +80,10 @@ def get_valid_dining_session(
     if not session_token:
         raise HTTPException(
             status_code=401,
-            detail="Dining session missing. Refresh the menu to start a session.",
+            detail=(
+                "Dining session is being prepared. "
+                "Please refresh the menu in a moment."
+            ),
         )
 
     table, branch = get_active_table_and_branch(qr_token, db)
@@ -93,13 +100,13 @@ def get_valid_dining_session(
     if not session:
         raise HTTPException(
             status_code=401,
-            detail="Invalid dining session. Refresh the menu to start a new session.",
+            detail="Dining session is no longer valid. Please refresh the menu.",
         )
 
     if session.closed_at is not None:
         raise HTTPException(
             status_code=410,
-            detail="This dining session is closed. Refresh the menu to start a new session.",
+            detail="This dining session has ended. Please refresh the menu.",
         )
 
     return table, branch, session
@@ -112,7 +119,7 @@ def create_dining_session(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """Create a private browser dining session for an active table."""
+    """Create an internal browser session for an active table."""
     table, _branch = get_active_table_and_branch(qr_token, db)
 
     session = DiningSession(
@@ -158,7 +165,6 @@ def create_public_order(
         db,
     )
 
-    # A customer ID is never trusted without checking this branch.
     customer = None
 
     if payload.customer_id is not None:
@@ -245,6 +251,7 @@ def create_public_order(
     )
 
     try:
+        table.is_occupied = True
         db.add(order)
         db.commit()
         db.refresh(order)

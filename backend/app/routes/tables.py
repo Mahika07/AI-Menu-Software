@@ -95,7 +95,7 @@ def table_payload(
         "qr_token": table.qr_token,
         "is_active": table.is_active,
         "is_unavailable": table.is_unavailable,
-        "is_occupied": occupied,
+        "is_occupied": bool(table.is_occupied or occupied),
     }
 
 
@@ -140,6 +140,7 @@ def create_table(
         table_number=table_number,
         is_active=True,
         is_unavailable=False,
+        is_occupied=False,
     )
 
     db.add(new_table)
@@ -221,10 +222,7 @@ def update_table(
 
     updates = table_data.model_dump(exclude_unset=True)
 
-    if (
-        "table_number" in updates
-        and updates["table_number"] is not None
-    ):
+    if "table_number" in updates and updates["table_number"] is not None:
         table_number = updates["table_number"].strip()
 
         if not table_number:
@@ -251,25 +249,42 @@ def update_table(
                 detail="Table number already exists in this branch.",
             )
 
-    # Do not block a table with an outstanding order or unpaid bill.
+    outstanding = table_has_outstanding_order(db, table)
+
+    if updates.get("is_occupied") is False and outstanding:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This table cannot be marked available while it has an "
+                "outstanding order or unpaid bill."
+            ),
+        )
+
+    if updates.get("is_occupied") is True and table.is_unavailable:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Mark the table available for service before marking it occupied."
+            ),
+        )
+
     if updates.get("is_unavailable") is True:
-        if table_has_outstanding_order(db, table):
+        if outstanding or table.is_occupied:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=(
-                    "This table cannot be marked unavailable while "
-                    "it has an outstanding order or unpaid bill."
+                    "This table cannot be marked unavailable while it is "
+                    "occupied or has an outstanding order or unpaid bill."
                 ),
             )
 
-    # Do not deactivate a table while it is occupied.
     if updates.get("is_active") is False:
-        if table_has_outstanding_order(db, table):
+        if outstanding or table.is_occupied:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=(
-                    "This table cannot be deactivated while it has "
-                    "an outstanding order or unpaid bill."
+                    "This table cannot be deactivated while it is occupied "
+                    "or has an outstanding order or unpaid bill."
                 ),
             )
 
@@ -309,11 +324,11 @@ def delete_table(
             detail="Table not found.",
         )
 
-    if table_has_outstanding_order(db, table):
+    if table_has_outstanding_order(db, table) or table.is_occupied:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                "This table cannot be deleted while it has "
+                "This table cannot be deleted while it is occupied or has "
                 "an outstanding order or unpaid bill."
             ),
         )

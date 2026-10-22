@@ -1,7 +1,7 @@
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user
@@ -11,6 +11,8 @@ from app.models.dining_session import DiningSession
 from app.models.restaurant import Restaurant
 from app.models.table import RestaurantTable
 from app.models.user import User
+
+
 router = APIRouter(
     prefix="/branches/{branch_id}/dining-sessions",
     tags=["Dining Sessions"],
@@ -45,9 +47,9 @@ def serialize_session(session: DiningSession) -> dict:
         "created_at": session.created_at,
         "expires_at": session.expires_at,
         "closed_at": session.closed_at,
-        # Session remains active until a restaurant staff member closes it.
         "is_active": session.closed_at is None,
     }
+
 
 @router.get("")
 def list_dining_sessions(
@@ -141,10 +143,12 @@ def reset_table_session(
         return {
             "table_id": table.id,
             "closed_count": len(active_sessions),
-            "message": "Active sessions closed. A new session will be created when the next diner scans the QR code.",
+            "message": (
+                "Active dining sessions closed. Staff can mark the table "
+                "available when it is ready for the next customer."
+            ),
         }
 
     except Exception:
         db.rollback()
         raise
-

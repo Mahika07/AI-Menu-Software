@@ -1,3 +1,4 @@
+
 import uuid
 
 from sqlalchemy import ForeignKey, String, Boolean
@@ -38,6 +39,14 @@ class RestaurantTable(Base):
 
     # Temporary operational block, separate from system activation.
     is_unavailable: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+
+    # Staff-controlled occupancy flag.
+    # Outstanding orders can also imply that a table is occupied.
+    is_occupied: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
         nullable=False,
