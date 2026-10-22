@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 
 import {
@@ -15,11 +15,13 @@ import {
   X,
   Monitor,
   FileBarChart,
+  Armchair,
 } from "lucide-react";
 
 import { getRestaurants } from "../api/restaurants";
 import { getBranches } from "../api/branches";
 import { getBranchOrders } from "../api/orders";
+import { getTables } from "../api/tables";
 
 const navigationItems = [
   { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard, end: true },
@@ -49,13 +51,29 @@ const navigationItems = [
     path: "/dashboard/pos",
     icon: Monitor,
   },
+  {
+    label: "Table Status",
+    path: "/dashboard/table-status",
+    icon: Armchair,
+  },
 ];
 
 const ACTIVE_STATUSES = ["pending", "confirmed", "preparing", "ready"];
 
+function getAvailableTableCount(tables) {
+  return tables.filter(
+    (table) =>
+      table.is_active !== false &&
+      table.is_occupied !== true &&
+      table.is_unavailable !== true,
+  ).length;
+}
+
 export default function Sidebar({ open = false, onNavigate, onClose }) {
   const navigate = useNavigate();
+
   const [activeOrderCount, setActiveOrderCount] = useState(0);
+  const [availableTableCount, setAvailableTableCount] = useState(0);
   const [branchId, setBranchId] = useState("");
 
   // Load the first available branch.
@@ -65,6 +83,7 @@ export default function Sidebar({ open = false, onNavigate, onClose }) {
     async function loadBranch() {
       try {
         const restaurants = await getRestaurants();
+
         if (cancelled || !Array.isArray(restaurants) || !restaurants.length) {
           return;
         }
@@ -76,7 +95,7 @@ export default function Sidebar({ open = false, onNavigate, onClose }) {
           setBranchId(String(branches[0].id));
         }
       } catch (error) {
-        console.error("Unable to load kitchen notification branch:", error);
+        console.error("Unable to load sidebar branch:", error);
       }
     }
 
@@ -121,6 +140,38 @@ export default function Sidebar({ open = false, onNavigate, onClose }) {
       window.clearInterval(intervalId);
     };
   }, [branchId]);
+
+  // Refresh available table count every five seconds.
+  const refreshAvailableTables = useCallback(async () => {
+    if (!branchId) {
+      setAvailableTableCount(0);
+      return;
+    }
+
+    try {
+      const result = await getTables(branchId);
+      const tables = Array.isArray(result) ? result : [];
+
+      setAvailableTableCount(getAvailableTableCount(tables));
+    } catch (error) {
+      console.error("Unable to refresh table status badge:", error);
+    }
+  }, [branchId]);
+
+  useEffect(() => {
+    if (!branchId) {
+      setAvailableTableCount(0);
+      return undefined;
+    }
+
+    refreshAvailableTables();
+
+    const intervalId = window.setInterval(refreshAvailableTables, 5000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [branchId, refreshAvailableTables]);
 
   function handleLogout() {
     localStorage.removeItem("access_token");
@@ -187,6 +238,29 @@ export default function Sidebar({ open = false, onNavigate, onClose }) {
                   aria-label={`${activeOrderCount} active orders`}
                 >
                   {activeOrderCount > 99 ? "99+" : activeOrderCount}
+                </span>
+              )}
+
+              {item.path === "/dashboard/table-status" && (
+                <span
+                  style={{
+                    marginLeft: "auto",
+                    minWidth: 22,
+                    height: 22,
+                    padding: "0 6px",
+                    borderRadius: 999,
+                    background: "#16a34a",
+                    color: "#fff",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                  aria-label={`${availableTableCount} available tables`}
+                  title={`${availableTableCount} available tables`}
+                >
+                  {availableTableCount > 99 ? "99+" : availableTableCount}
                 </span>
               )}
             </NavLink>

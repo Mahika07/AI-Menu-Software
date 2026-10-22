@@ -14,12 +14,12 @@ class RestaurantTable(Base):
     branch_id: Mapped[int] = mapped_column(
         ForeignKey("branches.id", ondelete="CASCADE"),
         nullable=False,
-        index=True
+        index=True,
     )
 
     table_number: Mapped[str] = mapped_column(
         String(50),
-        nullable=False
+        nullable=False,
     )
 
     qr_token: Mapped[str] = mapped_column(
@@ -27,16 +27,23 @@ class RestaurantTable(Base):
         unique=True,
         nullable=False,
         index=True,
-        default=lambda: uuid.uuid4().hex
+        default=lambda: uuid.uuid4().hex,
     )
 
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
-        nullable=False
+        nullable=False,
+    )
+
+    # Temporary operational block, separate from system activation.
+    is_unavailable: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
     )
 
     branch = relationship(
         "Branch",
-        back_populates="tables"
+        back_populates="tables",
     )

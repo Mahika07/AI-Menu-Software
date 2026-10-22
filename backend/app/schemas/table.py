@@ -1,4 +1,3 @@
-
 from pydantic import BaseModel, Field
 
 
@@ -17,6 +16,7 @@ class TableUpdate(BaseModel):
     )
 
     is_active: bool | None = None
+    is_unavailable: bool | None = None
 
 
 class TableResponse(BaseModel):
@@ -25,8 +25,9 @@ class TableResponse(BaseModel):
     table_number: str
     qr_token: str
     is_active: bool
+    is_unavailable: bool = False
 
-    # Computed by the tables API, not stored in the database.
+    # Calculated by the API from orders and bills.
     is_occupied: bool = False
 
     model_config = {"from_attributes": True}

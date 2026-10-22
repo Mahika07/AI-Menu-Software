@@ -207,10 +207,11 @@ def create_pos_order(
             table = (
                 db.query(RestaurantTable)
                 .filter(
-                    RestaurantTable.id == payload.table_id,
-                    RestaurantTable.branch_id == branch.id,
-                    RestaurantTable.is_active.is_(True),
-                )
+    RestaurantTable.id == payload.table_id,
+    RestaurantTable.branch_id == branch.id,
+    RestaurantTable.is_active.is_(True),
+    RestaurantTable.is_unavailable.is_(False),
+)
                 .with_for_update()
                 .first()
             )

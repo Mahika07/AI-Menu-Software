@@ -44,9 +44,11 @@ def get_owned_branch(
     return branch
 
 
-
-def table_payload(db: Session, table: RestaurantTable) -> dict:
-    """Calculate occupancy using active orders and unpaid bills."""
+def table_has_outstanding_order(
+    db: Session,
+    table: RestaurantTable,
+) -> bool:
+    """Return True when an order or unpaid bill still occupies the table."""
 
     outstanding_order = (
         db.query(Order.id)
@@ -61,7 +63,6 @@ def table_payload(db: Session, table: RestaurantTable) -> dict:
             Order.branch_id == table.branch_id,
             Order.table_id == table.id,
             or_(
-                # An existing bill keeps the table occupied until paid.
                 and_(
                     Bill.id.is_not(None),
                     or_(
@@ -69,7 +70,6 @@ def table_payload(db: Session, table: RestaurantTable) -> dict:
                         Bill.payment_status != "paid",
                     ),
                 ),
-                # Without a bill, only a non-terminal order occupies it.
                 and_(
                     Bill.id.is_(None),
                     Order.status.notin_(["completed", "cancelled"]),
@@ -79,14 +79,25 @@ def table_payload(db: Session, table: RestaurantTable) -> dict:
         .first()
     )
 
+    return outstanding_order is not None
+
+
+def table_payload(
+    db: Session,
+    table: RestaurantTable,
+) -> dict:
+    occupied = table_has_outstanding_order(db, table)
+
     return {
         "id": table.id,
         "branch_id": table.branch_id,
         "table_number": table.table_number,
         "qr_token": table.qr_token,
         "is_active": table.is_active,
-        "is_occupied": outstanding_order is not None,
+        "is_unavailable": table.is_unavailable,
+        "is_occupied": occupied,
     }
+
 
 @router.post(
     "",
@@ -101,11 +112,19 @@ def create_table(
 ):
     branch = get_owned_branch(branch_id, current_user, db)
 
+    table_number = table_data.table_number.strip()
+
+    if not table_number:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Table number cannot be empty.",
+        )
+
     existing_table = (
         db.query(RestaurantTable)
         .filter(
             RestaurantTable.branch_id == branch.id,
-            RestaurantTable.table_number == table_data.table_number,
+            RestaurantTable.table_number == table_number,
         )
         .first()
     )
@@ -118,7 +137,9 @@ def create_table(
 
     new_table = RestaurantTable(
         branch_id=branch.id,
-        table_number=table_data.table_number,
+        table_number=table_number,
+        is_active=True,
+        is_unavailable=False,
     )
 
     db.add(new_table)
@@ -200,12 +221,25 @@ def update_table(
 
     updates = table_data.model_dump(exclude_unset=True)
 
-    if "table_number" in updates:
+    if (
+        "table_number" in updates
+        and updates["table_number"] is not None
+    ):
+        table_number = updates["table_number"].strip()
+
+        if not table_number:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Table number cannot be empty.",
+            )
+
+        updates["table_number"] = table_number
+
         existing_table = (
             db.query(RestaurantTable)
             .filter(
                 RestaurantTable.branch_id == branch.id,
-                RestaurantTable.table_number == updates["table_number"],
+                RestaurantTable.table_number == table_number,
                 RestaurantTable.id != table.id,
             )
             .first()
@@ -215,6 +249,28 @@ def update_table(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Table number already exists in this branch.",
+            )
+
+    # Do not block a table with an outstanding order or unpaid bill.
+    if updates.get("is_unavailable") is True:
+        if table_has_outstanding_order(db, table):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This table cannot be marked unavailable while "
+                    "it has an outstanding order or unpaid bill."
+                ),
+            )
+
+    # Do not deactivate a table while it is occupied.
+    if updates.get("is_active") is False:
+        if table_has_outstanding_order(db, table):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This table cannot be deactivated while it has "
+                    "an outstanding order or unpaid bill."
+                ),
             )
 
     for field, value in updates.items():
@@ -253,11 +309,13 @@ def delete_table(
             detail="Table not found.",
         )
 
-    # Never delete a table while an order is still awaiting payment.
-    if table_payload(db, table)["is_occupied"]:
+    if table_has_outstanding_order(db, table):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="This table cannot be deleted while an order is awaiting payment.",
+            detail=(
+                "This table cannot be deleted while it has "
+                "an outstanding order or unpaid bill."
+            ),
         )
 
     db.delete(table)

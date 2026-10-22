@@ -26,6 +26,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import POS from "./pages/POS";
 import Reports from "./pages/Reports";
+import TableStatus from "./pages/TableStatus";
 function ProtectedLayout({ children }) {
   return (
     <ProtectedRoute>
@@ -229,6 +230,24 @@ function App() {
           element={
             <ProtectedLayout>
               <Reports />
+            </ProtectedLayout>
+          }
+        />
+        {/* Table Status */}
+        <Route
+          path="/dashboard/table-status"
+          element={
+            <ProtectedLayout>
+              <TableStatus />
+            </ProtectedLayout>
+          }
+        />
+
+        <Route
+          path="/dashboard/restaurants/:restaurantId/branches/:branchId/table-status"
+          element={
+            <ProtectedLayout>
+              <TableStatus />
             </ProtectedLayout>
           }
         />
