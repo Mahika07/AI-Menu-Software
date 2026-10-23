@@ -15,22 +15,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "tables",
-        sa.Column(
-            "is_unavailable",
-            sa.Boolean(),
-            nullable=False,
-            server_default=sa.false(),
-        ),
-    )
-
-    op.alter_column(
-        "tables",
-        "is_unavailable",
-        server_default=None,
-    )
-
-
+    # The restored migration 1fab06e834a1 already adds
+    # tables.is_unavailable. Keep this migration as a no-op
+    # to avoid adding the same column twice.
+    pass
 def downgrade() -> None:
     op.drop_column("tables", "is_unavailable")

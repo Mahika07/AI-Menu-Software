@@ -1,9 +1,9 @@
+
 """repair missing password reset token table"""
 from typing import Sequence, Union
 
-from alembic import op
+from alembic import op, context
 import sqlalchemy as sa
-
 
 revision: str = "e7b6d4c2a901"
 down_revision: Union[str, Sequence[str], None] = "d45c93b110a1"
@@ -12,6 +12,11 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Schema inspection requires a live database connection.
+    # Skip inspection when Alembic generates offline SQL.
+    if context.is_offline_mode():
+        return
+
     bind = op.get_bind()
     inspector = sa.inspect(bind)
 
@@ -34,12 +39,14 @@ def upgrade() -> None:
         index["name"]
         for index in sa.inspect(bind).get_indexes("password_reset_tokens")
     }
+
     if "ix_password_reset_tokens_user_id" not in existing_indexes:
         op.create_index(
             "ix_password_reset_tokens_user_id",
             "password_reset_tokens",
             ["user_id"],
         )
+
     if "ix_password_reset_tokens_token_hash" not in existing_indexes:
         op.create_index(
             "ix_password_reset_tokens_token_hash",
@@ -47,6 +54,7 @@ def upgrade() -> None:
             ["token_hash"],
             unique=True,
         )
+
     if "ix_password_reset_tokens_expires_at" not in existing_indexes:
         op.create_index(
             "ix_password_reset_tokens_expires_at",
@@ -56,16 +64,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "ix_password_reset_tokens_expires_at",
-        table_name="password_reset_tokens",
-    )
-    op.drop_index(
-        "ix_password_reset_tokens_token_hash",
-        table_name="password_reset_tokens",
-    )
-    op.drop_index(
-        "ix_password_reset_tokens_user_id",
-        table_name="password_reset_tokens",
-    )
-    op.drop_table("password_reset_tokens")
+    # This table may have existed before the repair migration.
+    # Do not automatically delete it or its indexes.
+    pass

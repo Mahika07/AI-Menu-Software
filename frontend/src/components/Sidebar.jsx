@@ -42,6 +42,11 @@ const navigationItems = [
     icon: Wallet,
   },
   {
+    label: "Reports & Operations",
+    path: "/dashboard/business-reports",
+    icon: FileBarChart,
+  },
+  {
     label: "POS Reports",
     path: "/dashboard/reports",
     icon: FileBarChart,

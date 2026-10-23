@@ -28,6 +28,7 @@ from app.routes.sales_analytics import router as sales_analytics_router
 from app.routes import dining_sessions
 from app.routes.bills import router as bills_router
 from app.routes.customers import router as customers_router
+from app.routes.operations_analytics import router as operations_analytics_router
 app = FastAPI(
     title="Smart Menu API",
     version="1.0.0",
@@ -112,6 +113,7 @@ app.include_router(dining_sessions.router)
 app.include_router(bills_router)
 app.include_router(pos_router)
 app.include_router(customers_router)
+app.include_router(operations_analytics_router)
 
 
 # ---------------------------------------------------------
@@ -140,6 +142,7 @@ app.include_router(sales_analytics_router, prefix=API_V1_PREFIX)
 app.include_router(bills_router, prefix=API_V1_PREFIX)
 app.include_router(pos_router, prefix="/api/v1")
 app.include_router(customers_router, prefix=API_V1_PREFIX)
+app.include_router(operations_analytics_router, prefix=API_V1_PREFIX)
 
 @app.get("/health")
 def health():

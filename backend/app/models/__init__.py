@@ -11,6 +11,7 @@ from app.models.order import Order, OrderItem
 from app.models.dining_session import DiningSession
 from app.models.bill import Bill
 from app.models.customer import Customer
+from app.models.expense import Expense
 from app.models.password_reset_token import PasswordResetToken
 
 __all__ = [
@@ -27,5 +28,6 @@ __all__ = [
     "DiningSession",
     "Bill",
     "Customer",
+    "Expense",
     "PasswordResetToken",
 ]

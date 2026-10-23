@@ -26,6 +26,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import POS from "./pages/POS";
 import Reports from "./pages/Reports";
+import BusinessReports from "./pages/BusinessReports";
 import TableStatus from "./pages/TableStatus";
 function ProtectedLayout({ children }) {
   return (
@@ -221,6 +222,15 @@ function App() {
           element={
             <ProtectedLayout>
               <POS />
+            </ProtectedLayout>
+          }
+        />
+        {/* Consolidated Phase 6 reports and expenses */}
+        <Route
+          path="/dashboard/business-reports"
+          element={
+            <ProtectedLayout>
+              <BusinessReports />
             </ProtectedLayout>
           }
         />
