@@ -772,7 +772,7 @@ function Branches() {
                 <button
                   type="submit"
                   className="primary-action"
-                  disabled={saving || !form.name.trim() || addressLength < 5}
+                  disabled={saving}
                 >
                   {saving
                     ? "Saving..."
