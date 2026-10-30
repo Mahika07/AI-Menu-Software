@@ -1,3 +1,4 @@
+
 from datetime import datetime, timedelta, timezone
 
 from argon2 import PasswordHasher
@@ -9,7 +10,7 @@ from app.core.config import settings
 password_hasher = PasswordHasher()
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 
 
 def hash_password(password: str) -> str:
