@@ -12167,3 +12167,8 @@ select:focus-visible {
   }
 
 }
+
+.restaurant-management-page .restaurant-location svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}

@@ -43,6 +43,16 @@ function Restaurants() {
     logo_url: "",
   });
 
+  function releasePreview(url) {
+    if (url && url.startsWith("blob:")) {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  useEffect(() => {
+    return () => releasePreview(logoPreview);
+  }, [logoPreview]);
+
   async function loadRestaurants() {
     try {
       setLoading(true);
@@ -279,7 +289,9 @@ function Restaurants() {
       {/* MAIN CONTENT */}
 
       <main className="management-container">
-        {error && <div className="management-error">{error}</div>}
+        {error && !showForm && (
+          <div className="management-error">{error}</div>
+        )}
 
         <div className="management-title">
           <div>
@@ -427,6 +439,12 @@ function Restaurants() {
                 <X size={19} />
               </button>
             </div>
+
+            {error && (
+              <div className="management-error" role="alert">
+                {error}
+              </div>
+            )}
 
             <form onSubmit={handleSubmit}>
               {/* RESTAURANT NAME */}
