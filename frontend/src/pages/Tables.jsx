@@ -223,46 +223,44 @@ function Tables() {
       return;
     }
 
-    const statusLabels = {
-      available: "Available",
-      occupied: "Occupied",
-      unavailable: "Unavailable",
-    };
-
-    const messages = {
-      available: `Mark ${table.table_number} as available?`,
-      occupied: `Mark ${table.table_number} as occupied?`,
-      unavailable: `Mark ${table.table_number} as unavailable for maintenance or cleaning?`,
-    };
-
-    if (!window.confirm(messages[nextStatus])) return;
+    if (!["available", "occupied", "unavailable"].includes(nextStatus)) {
+      return;
+    }
 
     try {
       setError("");
       setNotice("");
       setUpdatingTableId(table.id);
 
-      const payload = {
+      await updateTable(branchId, table.id, {
         is_occupied: nextStatus === "occupied",
         is_unavailable: nextStatus === "unavailable",
+      });
+
+      const labels = {
+        available: "Available",
+        occupied: "Occupied",
+        unavailable: "Unavailable",
       };
 
-      await updateTable(branchId, table.id, payload);
-
       setNotice(
-        `${table.table_number} is now ${statusLabels[nextStatus].toLowerCase()}.`,
+        `${table.table_number} status changed to ${labels[nextStatus]}.`,
       );
 
       await loadTables(false);
     } catch (err) {
+      const detail = err.response?.data?.detail;
+
       setError(
-        err.response?.data?.detail ||
-          `Could not change table status to ${statusLabels[nextStatus]}.`,
+        typeof detail === "string" ? detail : "Unable to update table status.",
       );
+
+      await loadTables(false);
     } finally {
       setUpdatingTableId(null);
     }
   }
+
   async function handleDelete(table) {
     if (table.is_occupied) {
       setError(
@@ -912,86 +910,66 @@ function Tables() {
                 </div>
 
                 {/* AVAILABILITY ACTION */}
-                {/* TABLE STATUS ACTIONS */}
+                {/* TABLE STATUS DROPDOWN */}
                 {table.is_active !== false && (
                   <div
                     style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                      gap: 8,
                       marginTop: 14,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 7,
                     }}
                   >
-                    {tableStatus.key === "available" && (
-                      <>
-                        <button
-                          type="button"
-                          className="primary-button"
-                          disabled={busy}
-                          onClick={() => changeTableStatus(table, "occupied")}
-                          style={{ justifyContent: "center" }}
-                        >
-                          <Armchair size={16} />
-                          Mark Occupied
-                        </button>
+                    <label
+                      htmlFor={`table-status-${table.id}`}
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: "var(--text-color, #334155)",
+                      }}
+                    >
+                      Table Status
+                    </label>
 
-                        <button
-                          type="button"
-                          className="secondary-button"
-                          disabled={busy}
-                          onClick={() =>
-                            changeTableStatus(table, "unavailable")
-                          }
-                          style={{ justifyContent: "center" }}
-                        >
-                          <Ban size={16} />
-                          Mark Unavailable
-                        </button>
-                      </>
-                    )}
+                    <select
+                      id={`table-status-${table.id}`}
+                      value={tableStatus.key}
+                      disabled={busy}
+                      onChange={(event) =>
+                        changeTableStatus(table, event.target.value)
+                      }
+                      style={{
+                        width: "100%",
+                        padding: "12px 14px",
+                        borderRadius: 10,
+                        border: "1px solid var(--border-color, #d1d5db)",
+                        background:
+                          tableStatus.key === "available"
+                            ? "#dcfce7"
+                            : tableStatus.key === "occupied"
+                              ? "#fee2e2"
+                              : "#fef3c7",
+                        color:
+                          tableStatus.key === "available"
+                            ? "#15803d"
+                            : tableStatus.key === "occupied"
+                              ? "#b91c1c"
+                              : "#a16207",
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: busy ? "not-allowed" : "pointer",
+                        outline: "none",
+                      }}
+                    >
+                      <option value="available">Available</option>
+                      <option value="occupied">Occupied</option>
+                      <option value="unavailable">Unavailable</option>
+                    </select>
 
-                    {tableStatus.key === "occupied" && (
-                      <>
-                        <button
-                          type="button"
-                          className="secondary-button"
-                          disabled={busy}
-                          onClick={() => changeTableStatus(table, "available")}
-                          style={{ justifyContent: "center" }}
-                        >
-                          <CheckCircle2 size={16} />
-                          Mark Available
-                        </button>
-
-                        <button
-                          type="button"
-                          className="secondary-button"
-                          disabled={busy}
-                          onClick={() =>
-                            changeTableStatus(table, "unavailable")
-                          }
-                          style={{ justifyContent: "center" }}
-                        >
-                          <Ban size={16} />
-                          Mark Unavailable
-                        </button>
-                      </>
-                    )}
-
-                    {tableStatus.key === "unavailable" && (
-                      <button
-                        type="button"
-                        className="primary-button"
-                        disabled={busy}
-                        onClick={() => changeTableStatus(table, "available")}
-                        style={{
-                          gridColumn: "1 / -1",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <CheckCircle2 size={16} />
-                        Mark Available
-                      </button>
+                    {busy && (
+                      <small style={{ color: "var(--muted-text, #64748b)" }}>
+                        Updating status...
+                      </small>
                     )}
                   </div>
                 )}
