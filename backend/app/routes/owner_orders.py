@@ -1,16 +1,16 @@
 from datetime import date, datetime, time, timedelta, timezone
-
-from sqlalchemy import func, or_
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.dependencies import get_current_user
 from app.database.connection import get_db
+from app.models.bill import Bill
 from app.models.branch import Branch
-from app.models.order import Order
-from app.models.order import OrderItem
+from app.models.order import Order, OrderItem
 from app.models.restaurant import Restaurant
 from app.models.user import User
 from app.schemas.order import (
@@ -26,6 +26,8 @@ router = APIRouter(
 )
 
 
+CENT = Decimal("0.01")
+
 ALLOWED_TRANSITIONS = {
     "pending": {"confirmed", "cancelled"},
     "confirmed": {"preparing", "cancelled"},
@@ -34,7 +36,6 @@ ALLOWED_TRANSITIONS = {
     "completed": set(),
     "cancelled": set(),
 }
-
 
 ITEM_TRANSITIONS = {
     "pending": {"preparing", "cancelled"},
@@ -45,14 +46,8 @@ ITEM_TRANSITIONS = {
 }
 
 
-ORDER_STATUSES = {
-    "pending",
-    "confirmed",
-    "preparing",
-    "ready",
-    "completed",
-    "cancelled",
-}
+def money(value: Decimal) -> Decimal:
+    return value.quantize(CENT, rounding=ROUND_HALF_UP)
 
 
 def utc_now() -> datetime:
@@ -103,45 +98,48 @@ def get_order_with_items(
 
 
 def recalculate_order_status(order: Order) -> None:
-    """Recalculate the order status without regressing a mixed-progress order.
-
-    Individual item statuses are authoritative. An order is completed only
-    when every item is served or cancelled and at least one was served.
-    If any item is still pending while another item has progressed to ready
-    or served, keep the overall order active as ``preparing`` rather than
-    incorrectly downgrading it to ``pending`` or ``confirmed``.
-    """
     items = list(order.items or [])
 
     if not items:
         return
 
-    statuses = [item.status or "pending" for item in items]
-    now = utc_now()
+    statuses = [
+        item.status or "pending"
+        for item in items
+    ]
 
     if all(value == "cancelled" for value in statuses):
         order.status = "cancelled"
+
     elif (
         all(value in {"served", "cancelled"} for value in statuses)
         and any(value == "served" for value in statuses)
     ):
         order.status = "completed"
+
     elif "preparing" in statuses:
         order.status = "preparing"
+
     elif "pending" in statuses and any(
-        value in {"ready", "served"} for value in statuses
+        value in {"ready", "served"}
+        for value in statuses
     ):
         order.status = "preparing"
+
     elif all(
-        value in {"ready", "served", "cancelled"} for value in statuses
+        value in {"ready", "served", "cancelled"}
+        for value in statuses
     ):
         order.status = "ready"
+
     elif "pending" in statuses:
         order.status = (
-            "confirmed" if order.status == "confirmed" else "pending"
+            "confirmed"
+            if order.status == "confirmed"
+            else "pending"
         )
 
-    order.updated_at = now
+    order.updated_at = utc_now()
 
 
 def set_item_status(
@@ -152,6 +150,112 @@ def set_item_status(
     item.status = new_status
     item.status_updated_at = now
 
+
+
+def recalculate_bill_for_order(
+    db: Session,
+    order: Order,
+    cancelled_by: str,
+) -> None:
+    """
+    Recalculate the bill using active order items only.
+
+    Cancelled items remain in the order history.
+    Their original prices and quantities are not changed.
+    """
+
+    bill = (
+        db.query(Bill)
+        .filter(Bill.order_id == order.id)
+        .with_for_update()
+        .first()
+    )
+
+    if bill is None:
+        return
+
+    cancelled_items = [
+        item
+        for item in order.items
+        if (item.status or "pending") == "cancelled"
+    ]
+
+    active_items = [
+        item
+        for item in order.items
+        if (item.status or "pending") != "cancelled"
+    ]
+
+    cancelled_amount = money(
+        sum(
+            (
+                Decimal(str(item.line_total or 0))
+                for item in cancelled_items
+            ),
+            Decimal("0.00"),
+        )
+    )
+
+    new_subtotal = money(
+        sum(
+            (
+                Decimal(str(item.line_total or 0))
+                for item in active_items
+            ),
+            Decimal("0.00"),
+        )
+    )
+
+    old_subtotal = money(
+        Decimal(str(bill.subtotal or 0))
+    )
+
+    old_discount = money(
+        Decimal(str(bill.discount_amount or 0))
+    )
+
+    old_tax = money(
+        Decimal(str(bill.tax_amount or 0))
+    )
+
+    old_taxable_amount = max(
+        old_subtotal - old_discount,
+        Decimal("0.00"),
+    )
+
+    # Preserve the effective tax rate already used by this bill.
+    tax_rate = (
+        old_tax / old_taxable_amount
+        if old_taxable_amount > 0
+        else Decimal("0.00")
+    )
+
+    new_discount = min(
+        old_discount,
+        new_subtotal,
+    )
+
+    new_taxable_amount = max(
+        new_subtotal - new_discount,
+        Decimal("0.00"),
+    )
+
+    new_tax = money(
+        new_taxable_amount * tax_rate
+    )
+
+    new_total = money(
+        new_taxable_amount + new_tax
+    )
+
+    bill.subtotal = new_subtotal
+    bill.discount_amount = new_discount
+    bill.tax_amount = new_tax
+    bill.total_amount = new_total
+
+    bill.cancelled_amount = cancelled_amount
+    bill.cancelled_by = cancelled_by
+    bill.cancelled_at = utc_now()
 
 @router.get("", response_model=list[OwnerOrderResponse])
 def list_branch_orders(
@@ -223,8 +327,6 @@ def list_branch_order_history(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Search and paginate order history for an owned branch."""
-
     branch = get_owned_branch(
         branch_id,
         current_user,
@@ -250,21 +352,19 @@ def list_branch_order_history(
         )
 
     if search and search.strip():
-        term = search.strip()
-        pattern = f"%{term}%"
+        pattern = f"%{search.strip()}%"
 
-        search_conditions = [
+        conditions = [
             Order.order_number.ilike(pattern),
             Order.customer_name.ilike(pattern),
         ]
 
-        # Support customer mobile search when the model has this field.
         if hasattr(Order, "customer_number"):
-            search_conditions.append(
+            conditions.append(
                 Order.customer_number.ilike(pattern)
             )
 
-        query = query.filter(or_(*search_conditions))
+        query = query.filter(or_(*conditions))
 
     if start_date:
         start_datetime = datetime.combine(
@@ -351,9 +451,6 @@ def update_order_status(
 
     now = utc_now()
 
-    # Bulk order actions are kept for compatibility with the
-    # existing Orders page. Individual kitchen controls should
-    # use the item-status endpoint below.
     if payload.status == "preparing":
         for item in order.items:
             if item.status == "pending":
@@ -379,6 +476,9 @@ def update_order_status(
                 set_item_status(item, "cancelled", now)
 
     recalculate_order_status(order)
+
+    if payload.status == "cancelled":
+        recalculate_bill_for_order(db, order, cancelled_by="owner")
 
     try:
         db.commit()
@@ -467,6 +567,9 @@ def update_order_item_status(
     )
 
     recalculate_order_status(order)
+
+    if payload.status == "cancelled":
+        recalculate_bill_for_order(db, order, cancelled_by="owner")
 
     try:
         db.commit()

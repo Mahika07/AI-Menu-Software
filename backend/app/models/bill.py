@@ -63,6 +63,24 @@ class Bill(Base):
         default=Decimal("0.00"),
     )
 
+    # Cancellation tracking
+    cancelled_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0",
+    )
+
+    cancelled_by: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     payment_status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,

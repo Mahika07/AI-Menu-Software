@@ -9,12 +9,31 @@ const formatMoney = (amount) =>
     minimumFractionDigits: 2,
   }).format(Number(amount || 0));
 
+const formatDate = (value) =>
+  value
+    ? new Date(value).toLocaleString("en-IN", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : "—";
+
 export default function BillReceipt({ bill, order, restaurant, branch }) {
   const navigate = useNavigate();
 
+  // Keep every original order item in the receipt, including cancelled items.
   const items = useMemo(() => order?.items || [], [order]);
+  const cancelledItems = useMemo(
+    () =>
+      items.filter(
+        (item) =>
+          String(item.status || "pending").toLowerCase() === "cancelled",
+      ),
+    [items],
+  );
+
   const paymentStatus = String(bill?.payment_status || "unpaid").toLowerCase();
   const isPaid = paymentStatus === "paid";
+  const cancelledAmount = Number(bill?.cancelled_amount || 0);
 
   if (!bill || !order) {
     return (
@@ -48,9 +67,7 @@ export default function BillReceipt({ bill, order, restaurant, branch }) {
           <h1>{restaurant?.name || "Restaurant"}</h1>
 
           {branch?.name && <p className="receipt-branch">{branch.name}</p>}
-
           {branch?.address && <p>{branch.address}</p>}
-
           {branch?.phone && <p>Phone: {branch.phone}</p>}
 
           <div className="receipt-badge">
@@ -76,14 +93,7 @@ export default function BillReceipt({ bill, order, restaurant, branch }) {
 
           <div>
             <span>Date</span>
-            <strong>
-              {bill.created_at
-                ? new Date(bill.created_at).toLocaleString("en-IN", {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  })
-                : "—"}
-            </strong>
+            <strong>{formatDate(bill.created_at)}</strong>
           </div>
 
           {order.customer_name && (
@@ -102,28 +112,97 @@ export default function BillReceipt({ bill, order, restaurant, branch }) {
             <span>Total</span>
           </div>
 
-          {items.map((item, index) => (
-            <div
-              className="receipt-item"
-              key={item.id ?? `${item.dish_name}-${index}`}
-            >
-              <span>{item.dish_name || "Menu item"}</span>
-              <span>{item.quantity}</span>
-              <span>{formatMoney(item.unit_price)}</span>
-              <span>{formatMoney(item.line_total)}</span>
-            </div>
-          ))}
+          {items.map((item, index) => {
+            const isCancelled =
+              String(item.status || "pending").toLowerCase() === "cancelled";
+
+            return (
+              <div
+                className={`receipt-item ${isCancelled ? "receipt-item-cancelled" : ""}`}
+                key={item.id ?? `${item.dish_name}-${index}`}
+                style={
+                  isCancelled
+                    ? {
+                        color: "#8b8b8b",
+                        background: "#fafafa",
+                        textDecoration: "line-through",
+                      }
+                    : undefined
+                }
+              >
+                <span>
+                  {item.dish_name || "Menu item"}
+                  {isCancelled && (
+                    <small
+                      className="receipt-cancelled-label"
+                      style={{
+                        display: "block",
+                        color: "#b45309",
+                        fontWeight: 700,
+                        textDecoration: "none",
+                      }}
+                    >
+                      Cancelled · Not charged
+                    </small>
+                  )}
+                </span>
+                <span>{item.quantity}</span>
+                <span>{formatMoney(item.unit_price)}</span>
+                <span>{formatMoney(item.line_total)}</span>
+              </div>
+            );
+          })}
 
           {items.length === 0 && (
             <p className="receipt-no-items">No order items were provided.</p>
           )}
         </div>
 
+        {cancelledItems.length > 0 && (
+          <section
+            className="receipt-cancellation-summary"
+            style={{
+              marginTop: 16,
+              padding: 12,
+              border: "1px solid #f1d5a8",
+              borderRadius: 8,
+              background: "#fffaf1",
+            }}
+          >
+            <strong style={{ color: "#92400e" }}>Cancellation details</strong>
+            <p style={{ margin: "6px 0 0", color: "#6b5a43" }}>
+              {cancelledItems.length} item
+              {cancelledItems.length === 1 ? "" : "s"} cancelled. Cancelled
+              items are retained for order history and are not included in the
+              payable total.
+            </p>
+            {bill.cancelled_by && (
+              <p style={{ margin: "6px 0 0" }}>
+                <span>Cancelled by: </span>
+                <strong>{String(bill.cancelled_by).toUpperCase()}</strong>
+              </p>
+            )}
+            {bill.cancelled_at && (
+              <p style={{ margin: "4px 0 0" }}>
+                <span>Cancellation date: </span>
+                <strong>{formatDate(bill.cancelled_at)}</strong>
+              </p>
+            )}
+          </section>
+        )}
+
         <section className="receipt-totals">
           <div>
             <span>Subtotal</span>
             <strong>{formatMoney(bill.subtotal)}</strong>
           </div>
+
+          {cancelledAmount > 0 && (
+            <div className="receipt-cancelled-total">
+              <span>Cancelled amount (not charged)</span>
+              <strong>{formatMoney(cancelledAmount)}</strong>
+            </div>
+          )}
 
           {Number(bill.discount_amount) > 0 && (
             <div>
@@ -138,7 +217,7 @@ export default function BillReceipt({ bill, order, restaurant, branch }) {
           </div>
 
           <div className="receipt-grand-total">
-            <span>Total</span>
+            <span>Payable total</span>
             <strong>{formatMoney(bill.total_amount)}</strong>
           </div>
         </section>
@@ -162,14 +241,7 @@ export default function BillReceipt({ bill, order, restaurant, branch }) {
             </div>
             <div>
               <span>Paid at</span>
-              <strong>
-                {bill.paid_at
-                  ? new Date(bill.paid_at).toLocaleString("en-IN", {
-                      dateStyle: "medium",
-                      timeStyle: "short",
-                    })
-                  : "—"}
-              </strong>
+              <strong>{formatDate(bill.paid_at)}</strong>
             </div>
           </section>
         )}

@@ -1,4 +1,3 @@
-
 import secrets
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
@@ -8,6 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.rate_limit import limiter
 from app.database.connection import get_db
+from app.models.bill import Bill
 from app.models.branch import Branch
 from app.models.customer import Customer
 from app.models.dining_session import DiningSession
@@ -31,10 +31,85 @@ def money(value: Decimal) -> Decimal:
     return value.quantize(CENT, rounding=ROUND_HALF_UP)
 
 
+def recalculate_bill_for_order(
+    db: Session,
+    order: Order,
+    cancelled_by: str,
+) -> None:
+    """Update an existing bill from non-cancelled items without deleting history."""
+    bill = (
+        db.query(Bill)
+        .filter(Bill.order_id == order.id)
+        .with_for_update()
+        .first()
+    )
+
+    if bill is None:
+        return
+
+    cancelled_items = [
+        item for item in order.items
+        if (item.status or "pending") == "cancelled"
+    ]
+
+    active_items = [
+        item for item in order.items
+        if (item.status or "pending") != "cancelled"
+    ]
+
+    cancelled_amount = money(
+        sum(
+            (Decimal(str(item.line_total or 0)) for item in cancelled_items),
+            Decimal("0.00"),
+        )
+    )
+
+    new_subtotal = money(
+        sum(
+            (Decimal(str(item.line_total or 0)) for item in active_items),
+            Decimal("0.00"),
+        )
+    )
+
+    old_subtotal = money(Decimal(str(bill.subtotal or 0)))
+    old_discount = money(Decimal(str(bill.discount_amount or 0)))
+    old_tax = money(Decimal(str(bill.tax_amount or 0)))
+
+    old_taxable = max(
+        old_subtotal - old_discount,
+        Decimal("0.00"),
+    )
+
+    tax_rate = (
+        old_tax / old_taxable
+        if old_taxable > 0
+        else Decimal("0.00")
+    )
+
+    new_discount = min(old_discount, new_subtotal)
+
+    new_taxable = max(
+        new_subtotal - new_discount,
+        Decimal("0.00"),
+    )
+
+    new_tax = money(new_taxable * tax_rate)
+
+    bill.subtotal = new_subtotal
+    bill.discount_amount = new_discount
+    bill.tax_amount = new_tax
+    bill.total_amount = money(new_taxable + new_tax)
+
+    bill.cancelled_amount = cancelled_amount
+    bill.cancelled_by = cancelled_by
+    bill.cancelled_at = datetime.now(timezone.utc)
+
+
 def get_active_table_and_branch(
     qr_token: str,
     db: Session,
 ) -> tuple[RestaurantTable, Branch]:
+
     table = (
         db.query(RestaurantTable)
         .filter(
@@ -77,6 +152,7 @@ def get_valid_dining_session(
     session_token: str,
     db: Session,
 ) -> tuple[RestaurantTable, Branch, DiningSession]:
+
     if not session_token:
         raise HTTPException(
             status_code=401,
@@ -120,6 +196,7 @@ def create_dining_session(
     db: Session = Depends(get_db),
 ):
     """Create an internal browser session for an active table."""
+
     table, _branch = get_active_table_and_branch(qr_token, db)
 
     session = DiningSession(
@@ -137,6 +214,7 @@ def create_dining_session(
             "token": session.token,
             "expires_at": session.expires_at,
         }
+
     except Exception:
         db.rollback()
         raise
@@ -159,6 +237,7 @@ def create_public_order(
     ),
 ):
     """Place an order associated with the current dining session."""
+
     table, branch, dining_session = get_valid_dining_session(
         qr_token,
         x_dining_session_token,
@@ -185,6 +264,7 @@ def create_public_order(
 
         customer_name = customer.name
         customer_number = customer.phone
+
     else:
         customer_name = payload.customer_name
         customer_number = payload.customer_number
@@ -217,8 +297,10 @@ def create_public_order(
 
     for requested_item in payload.items:
         dish = dishes_by_id[requested_item.dish_id]
+
         unit_price = money(Decimal(str(dish.price)))
         line_total = money(unit_price * requested_item.quantity)
+
         subtotal += line_total
 
         order_items.append(
@@ -252,6 +334,7 @@ def create_public_order(
 
     try:
         table.is_occupied = True
+
         db.add(order)
         db.commit()
         db.refresh(order)
@@ -265,6 +348,7 @@ def create_public_order(
             )
             .one()
         )
+
     except Exception:
         db.rollback()
         raise
@@ -281,6 +365,7 @@ def get_public_order_status(
     db: Session = Depends(get_db),
 ):
     """Track an individual order using its order number."""
+
     order = (
         db.query(Order)
         .options(selectinload(Order.items))
@@ -289,7 +374,10 @@ def get_public_order_status(
     )
 
     if not order:
-        raise HTTPException(status_code=404, detail="Order not found.")
+        raise HTTPException(
+            status_code=404,
+            detail="Order not found.",
+        )
 
     return order
 
@@ -309,6 +397,7 @@ def get_active_table_orders(
     ),
 ):
     """Return active orders belonging only to this dining session."""
+
     table, branch, dining_session = get_valid_dining_session(
         qr_token,
         x_dining_session_token,
@@ -350,6 +439,7 @@ def cancel_public_order_item(
     ),
 ):
     """Cancel one pending item belonging to the current dining session."""
+
     table, branch, dining_session = get_valid_dining_session(
         qr_token,
         x_dining_session_token,
@@ -423,26 +513,37 @@ def cancel_public_order_item(
 
         if all(value == "cancelled" for value in statuses):
             order.status = "cancelled"
+
         elif "preparing" in statuses:
             order.status = "preparing"
+
         elif "pending" in statuses:
             order.status = (
                 "confirmed"
                 if order.status == "confirmed"
                 else "pending"
             )
+
         elif all(
             value in {"ready", "served", "cancelled"}
             for value in statuses
         ):
             if any(value == "ready" for value in statuses):
                 order.status = "ready"
+
             elif any(value == "served" for value in statuses):
                 order.status = "completed"
+
             else:
                 order.status = "cancelled"
 
         order.updated_at = datetime.now(timezone.utc)
+
+        recalculate_bill_for_order(
+            db,
+            order,
+            cancelled_by="customer",
+        )
 
         db.commit()
 
@@ -452,6 +553,94 @@ def cancel_public_order_item(
             .filter(Order.id == order.id)
             .one()
         )
+
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.post(
+    "/tables/{qr_token}/orders/{order_number}/cancel",
+    response_model=PublicOrderStatusResponse,
+)
+@limiter.limit("5/minute")
+def cancel_public_order(
+    qr_token: str,
+    order_number: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    x_dining_session_token: str = Header(
+        default="",
+        alias="X-Dining-Session-Token",
+    ),
+):
+    """Cancel the entire order only while its overall status is pending."""
+
+    table, branch, dining_session = get_valid_dining_session(
+        qr_token,
+        x_dining_session_token,
+        db,
+    )
+
+    order = (
+        db.query(Order)
+        .options(selectinload(Order.items))
+        .filter(
+            Order.order_number == order_number,
+            Order.branch_id == branch.id,
+            Order.table_id == table.id,
+            Order.dining_session_id == dining_session.id,
+        )
+        .with_for_update()
+        .first()
+    )
+
+    if order is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Order not found in this dining session.",
+        )
+
+    if order.status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "An order can only be cancelled while its "
+                "overall status is pending."
+            ),
+        )
+
+    now = datetime.now(timezone.utc)
+
+    try:
+        for item in order.items:
+            if (item.status or "pending") == "pending":
+                item.status = "cancelled"
+                item.status_updated_at = now
+
+        order.status = "cancelled"
+        order.subtotal = Decimal("0.00")
+        order.total_amount = Decimal("0.00")
+        order.updated_at = now
+
+        recalculate_bill_for_order(
+            db,
+            order,
+            cancelled_by="customer",
+        )
+
+        db.commit()
+
+        return (
+            db.query(Order)
+            .options(selectinload(Order.items))
+            .filter(
+                Order.id == order.id,
+                Order.branch_id == branch.id,
+            )
+            .one()
+        )
+
     except Exception:
         db.rollback()
         raise

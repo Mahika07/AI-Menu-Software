@@ -24,6 +24,7 @@ import {
   getTableOrders,
   getOrCreateDiningSession,
   cancelTableOrderItem,
+  cancelTableOrder,
 } from "../api/orders";
 import DishDetails from "../components/DishDetails";
 import AIAssistant from "../components/AIAssistant";
@@ -83,6 +84,7 @@ function PublicMenu() {
   const [tableOrders, setTableOrders] = useState([]);
   const [tableOrdersError, setTableOrdersError] = useState("");
   const [trackingError, setTrackingError] = useState("");
+  const [cancellingOrderNumber, setCancellingOrderNumber] = useState(null);
 
   const { track } = useAnalytics(analyticsBranchId, analyticsTableId, qrToken);
 
@@ -489,6 +491,59 @@ function PublicMenu() {
       setTrackingError(
         err.response?.data?.detail || "Unable to refresh your order status.",
       );
+    }
+  }
+
+  async function handleCancelEntireOrder(order) {
+    if ((order.status || "pending").toLowerCase() !== "pending") {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Cancel the entire order #${order.order_number}? All items will be cancelled and removed from the payable amount.`,
+    );
+
+    if (!confirmed) return;
+
+    setCancellingOrderNumber(order.order_number);
+    setTrackingError("");
+
+    try {
+      const updatedOrder = await cancelTableOrder(qrToken, order.order_number);
+
+      setTableOrders((current) =>
+        current.map((entry) =>
+          entry.order_number === updatedOrder.order_number
+            ? updatedOrder
+            : entry,
+        ),
+      );
+
+      if (activeOrder?.order_number === updatedOrder.order_number) {
+        setActiveOrder(updatedOrder);
+      }
+    } catch (err) {
+      setTrackingError(
+        err.response?.data?.detail ||
+          "Unable to cancel this order. It may have already moved to preparation.",
+      );
+
+      // Fetch the latest state if the order changed while cancellation was in flight.
+      try {
+        const latest = await getOrderStatus(order.order_number);
+        setTableOrders((current) =>
+          current.map((entry) =>
+            entry.order_number === latest.order_number ? latest : entry,
+          ),
+        );
+        if (activeOrder?.order_number === latest.order_number) {
+          setActiveOrder(latest);
+        }
+      } catch {
+        // Keep the original cancellation error visible.
+      }
+    } finally {
+      setCancellingOrderNumber(null);
     }
   }
 
@@ -993,6 +1048,20 @@ function PublicMenu() {
                       <span>Total</span>
                       <strong>{formatMoney(order.total_amount)}</strong>
                     </div>
+
+                    {(order.status || "pending").toLowerCase() ===
+                      "pending" && (
+                      <button
+                        type="button"
+                        className="cancel-order-item-button cancel-entire-order-button"
+                        disabled={cancellingOrderNumber === order.order_number}
+                        onClick={() => handleCancelEntireOrder(order)}
+                      >
+                        {cancellingOrderNumber === order.order_number
+                          ? "Cancelling order..."
+                          : "Cancel entire order"}
+                      </button>
+                    )}
 
                     <h3>Items in this order</h3>
                     {(order.items || []).map((item) => (

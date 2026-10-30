@@ -260,6 +260,9 @@ export default function Bills() {
         "Subtotal (INR)",
         "Discount (INR)",
         "Tax (INR)",
+        "Cancelled Amount (INR)",
+        "Cancelled By",
+        "Cancelled At",
         "Total Amount (INR)",
         "Payment Status",
         "Payment Method",
@@ -287,6 +290,9 @@ export default function Bills() {
         bill.subtotal,
         bill.discount_amount,
         bill.tax_amount,
+        bill.cancelled_amount,
+        bill.cancelled_by,
+        bill.cancelled_at,
         bill.total_amount,
         bill.payment_status,
         bill.payment_method,
@@ -747,6 +753,18 @@ export default function Bills() {
                               <strong>
                                 {formatCurrency(bill.total_amount)}
                               </strong>
+                              {Number(bill.cancelled_amount || 0) > 0 && (
+                                <small
+                                  style={{
+                                    display: "block",
+                                    marginTop: "4px",
+                                    color: "#b45309",
+                                  }}
+                                >
+                                  Cancelled:{" "}
+                                  {formatCurrency(bill.cancelled_amount)}
+                                </small>
+                              )}
                             </td>
 
                             <td>

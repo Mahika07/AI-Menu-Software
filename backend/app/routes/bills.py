@@ -75,6 +75,9 @@ def bill_payload(bill: Bill) -> dict:
         "discount_amount": bill.discount_amount,
         "tax_amount": bill.tax_amount,
         "total_amount": bill.total_amount,
+        "cancelled_amount": bill.cancelled_amount,
+        "cancelled_by": bill.cancelled_by,
+        "cancelled_at": bill.cancelled_at,
         "payment_status": bill.payment_status,
         "payment_method": bill.payment_method,
         "paid_at": bill.paid_at,
@@ -192,7 +195,6 @@ def list_bills_paginated(
     }
 
 # Keep this route before /{bill_id} for clarity and predictable routing.
-
 @router.get("/analytics/summary")
 def get_bill_analytics(
     branch_id: int,
@@ -202,14 +204,12 @@ def get_bill_analytics(
     db: Session = Depends(get_db),
 ):
     """
-    Return billing, discount, tax, collection, and order-status analytics
-    for a branch owned by the current user.
+    Return billing and collection analytics for an owned branch.
 
-    Billing metrics and daily billed totals use Bill.created_at.
-    Daily collections use Bill.paid_at.
-    Date boundaries are interpreted as UTC and use a half-open interval.
+    Date filters apply to bill creation dates. Date boundaries are treated
+    as UTC and use a half-open interval so the entire end date is included.
+    If omitted, all bill records for the branch are included.
     """
-
     get_owned_branch(db, branch_id, current_user)
 
     if start_date and end_date and start_date > end_date:
@@ -218,93 +218,59 @@ def get_bill_analytics(
             detail="start_date cannot be after end_date.",
         )
 
-    def date_bounds(column, query):
-        if start_date:
-            start_datetime = datetime.combine(
-                start_date,
-                time.min,
-                tzinfo=timezone.utc,
-            )
-            query = query.filter(column >= start_datetime)
-
-        if end_date:
-            end_datetime = datetime.combine(
-                end_date + timedelta(days=1),
-                time.min,
-                tzinfo=timezone.utc,
-            )
-            query = query.filter(column < end_datetime)
-
-        return query
-
-    # ---------------------------------------------------------
-    # 1. Bills created during the selected date range
-    # ---------------------------------------------------------
     query = db.query(Bill).filter(Bill.branch_id == branch_id)
-    query = date_bounds(Bill.created_at, query)
+
+    if start_date:
+        start_datetime = datetime.combine(
+            start_date,
+            time.min,
+            tzinfo=timezone.utc,
+        )
+        query = query.filter(Bill.created_at >= start_datetime)
+
+    if end_date:
+        # Exclusive next-day boundary includes every time on end_date.
+        end_datetime = datetime.combine(
+            end_date + timedelta(days=1),
+            time.min,
+            tzinfo=timezone.utc,
+        )
+        query = query.filter(Bill.created_at < end_datetime)
 
     paid_condition = Bill.payment_status == "paid"
     refunded_condition = Bill.payment_status == "refunded"
-    outstanding_condition = Bill.payment_status.notin_(
-        ["paid", "refunded"]
-    )
+    outstanding_condition = Bill.payment_status.notin_(["paid", "refunded"])
 
+    # Calculate headline metrics in one aggregate query.
     totals = query.with_entities(
         func.count(Bill.id).label("bill_count"),
-        func.coalesce(
-            func.sum(Bill.subtotal), 0
-        ).label("subtotal_amount"),
-        func.coalesce(
-            func.sum(Bill.discount_amount), 0
-        ).label("discount_amount"),
-        func.coalesce(
-            func.sum(Bill.tax_amount), 0
-        ).label("tax_amount"),
         func.coalesce(
             func.sum(Bill.total_amount), 0
         ).label("total_billed"),
         func.coalesce(
             func.sum(
-                case(
-                    (paid_condition, Bill.total_amount),
-                    else_=0,
-                )
+                case((paid_condition, Bill.total_amount), else_=0)
             ),
             0,
         ).label("paid_amount"),
         func.coalesce(
             func.sum(
-                case(
-                    (outstanding_condition, Bill.total_amount),
-                    else_=0,
-                )
+                case((outstanding_condition, Bill.total_amount), else_=0)
             ),
             0,
         ).label("outstanding_amount"),
-        func.coalesce(
-            func.sum(
-                case((paid_condition, 1), else_=0)
-            ),
-            0,
+        func.sum(
+            case((paid_condition, 1), else_=0)
         ).label("paid_count"),
-        func.coalesce(
-            func.sum(
-                case((outstanding_condition, 1), else_=0)
-            ),
-            0,
+        func.sum(
+            case((outstanding_condition, 1), else_=0)
         ).label("unpaid_count"),
-        func.coalesce(
-            func.sum(
-                case((refunded_condition, 1), else_=0)
-            ),
-            0,
+        func.sum(
+            case((refunded_condition, 1), else_=0)
         ).label("refunded_count"),
     ).first()
 
-    # ---------------------------------------------------------
-    # 2. Payment-method breakdown for bills created in range
-    #    that are currently marked as paid
-    # ---------------------------------------------------------
+    # Payment-method breakdown includes paid bills only.
     method_rows = (
         query.filter(paid_condition)
         .with_entities(
@@ -323,16 +289,12 @@ def get_bill_analytics(
         {
             "method": method or "unspecified",
             "bill_count": int(count or 0),
-            "amount": float(
-                money(Decimal(str(amount or 0)))
-            ),
+            "amount": float(money(Decimal(str(amount or 0)))),
         }
         for method, count, amount in method_rows
     ]
 
-    # ---------------------------------------------------------
-    # 3. Daily bill creation and billed revenue
-    # ---------------------------------------------------------
+    # Daily billed and collected totals use the same date-filtered query.
     daily_rows = (
         query.with_entities(
             func.date(Bill.created_at).label("bill_date"),
@@ -342,19 +304,10 @@ def get_bill_analytics(
             ).label("total_billed"),
             func.coalesce(
                 func.sum(
-                    case(
-                        (paid_condition, Bill.total_amount),
-                        else_=0,
-                    )
+                    case((paid_condition, Bill.total_amount), else_=0)
                 ),
                 0,
             ).label("paid_amount"),
-            func.coalesce(
-                func.sum(Bill.discount_amount), 0
-            ).label("discount_amount"),
-            func.coalesce(
-                func.sum(Bill.tax_amount), 0
-            ).label("tax_amount"),
         )
         .group_by(func.date(Bill.created_at))
         .order_by(func.date(Bill.created_at))
@@ -371,143 +324,27 @@ def get_bill_analytics(
             "paid_amount": float(
                 money(Decimal(str(row.paid_amount or 0)))
             ),
-            "discount_amount": float(
-                money(Decimal(str(row.discount_amount or 0)))
-            ),
-            "tax_amount": float(
-                money(Decimal(str(row.tax_amount or 0)))
-            ),
         }
         for row in daily_rows
     ]
 
-    # ---------------------------------------------------------
-    # 4. Daily collections by payment date (paid_at)
-    #
-    # This is intentionally separate from daily bill creation.
-    # It answers when payment was recorded, not when a bill
-    # was originally created.
-    # ---------------------------------------------------------
-    collection_query = db.query(Bill).filter(
-        Bill.branch_id == branch_id,
-        Bill.payment_status == "paid",
-        Bill.paid_at.isnot(None),
-    )
-    collection_query = date_bounds(
-        Bill.paid_at,
-        collection_query,
-    )
-
-    collection_rows = (
-        collection_query.with_entities(
-            func.date(Bill.paid_at).label("collection_date"),
-            func.count(Bill.id).label("payment_count"),
-            func.coalesce(
-                func.sum(Bill.total_amount), 0
-            ).label("collected_amount"),
-        )
-        .group_by(func.date(Bill.paid_at))
-        .order_by(func.date(Bill.paid_at))
-        .all()
-    )
-
-    daily_collections = [
-        {
-            "date": str(row.collection_date),
-            "payment_count": int(row.payment_count or 0),
-            "collected_amount": float(
-                money(
-                    Decimal(str(row.collected_amount or 0))
-                )
-            ),
-        }
-        for row in collection_rows
-    ]
-
-    # ---------------------------------------------------------
-    # 5. Order-status breakdown
-    #
-    # Uses Order.created_at, so orders without bills are included.
-    # ---------------------------------------------------------
-    order_query = db.query(Order).filter(
-        Order.branch_id == branch_id
-    )
-    order_query = date_bounds(Order.created_at, order_query)
-
-    order_status_rows = (
-        order_query.with_entities(
-            Order.status.label("order_status"),
-            func.count(Order.id).label("order_count"),
-        )
-        .group_by(Order.status)
-        .order_by(Order.status)
-        .all()
-    )
-
-    order_statuses = [
-        {
-            "status": row.order_status or "unspecified",
-            "count": int(row.order_count or 0),
-        }
-        for row in order_status_rows
-    ]
-
-    order_count = int(
-        order_query.with_entities(
-            func.count(Order.id)
-        ).scalar()
-        or 0
-    )
-
-    # ---------------------------------------------------------
-    # 6. Normalize monetary values
-    # ---------------------------------------------------------
-    subtotal_amount = Decimal(
-        str(totals.subtotal_amount or 0)
-    )
-    discount_amount = Decimal(
-        str(totals.discount_amount or 0)
-    )
-    tax_amount = Decimal(str(totals.tax_amount or 0))
     total_billed = Decimal(str(totals.total_billed or 0))
     paid_amount = Decimal(str(totals.paid_amount or 0))
-    outstanding_amount = Decimal(
-        str(totals.outstanding_amount or 0)
-    )
+    outstanding_amount = Decimal(str(totals.outstanding_amount or 0))
 
     return {
         "branch_id": branch_id,
-        "start_date": (
-            start_date.isoformat() if start_date else None
-        ),
-        "end_date": (
-            end_date.isoformat() if end_date else None
-        ),
-
-        # Billing summary
+        "start_date": start_date.isoformat() if start_date else None,
+        "end_date": end_date.isoformat() if end_date else None,
         "bill_count": int(totals.bill_count or 0),
         "paid_count": int(totals.paid_count or 0),
         "unpaid_count": int(totals.unpaid_count or 0),
         "refunded_count": int(totals.refunded_count or 0),
-
-        # Financial summary
-        "subtotal_amount": float(money(subtotal_amount)),
-        "discount_amount": float(money(discount_amount)),
-        "tax_amount": float(money(tax_amount)),
         "total_billed": float(money(total_billed)),
         "paid_amount": float(money(paid_amount)),
-        "outstanding_amount": float(
-            money(outstanding_amount)
-        ),
-
-        # Detailed breakdowns
+        "outstanding_amount": float(money(outstanding_amount)),
         "payment_methods": payment_methods,
         "daily_totals": daily_totals,
-        "daily_collections": daily_collections,
-
-        # Order summary
-        "order_count": order_count,
-        "order_statuses": order_statuses,
     }
 
 
@@ -554,6 +391,7 @@ def create_bill(
 
     order = (
         db.query(Order)
+        .options(selectinload(Order.items))
         .filter(
             Order.id == order_id,
             Order.branch_id == branch_id,
@@ -580,13 +418,35 @@ def create_bill(
             detail="A bill already exists for this order.",
         )
 
-    subtotal = money(Decimal(str(order.subtotal)))
+    # Calculate from the original order-item records. Cancelled items stay
+    # in history but must not contribute to the bill.
+    active_items = [
+        item for item in order.items
+        if (item.status or "pending") != "cancelled"
+    ]
+    cancelled_items = [
+        item for item in order.items
+        if (item.status or "pending") == "cancelled"
+    ]
+
+    subtotal = money(
+        sum(
+            (Decimal(str(item.line_total or 0)) for item in active_items),
+            Decimal("0.00"),
+        )
+    )
+    cancelled_amount = money(
+        sum(
+            (Decimal(str(item.line_total or 0)) for item in cancelled_items),
+            Decimal("0.00"),
+        )
+    )
     discount = money(payload.discount_amount)
 
     if discount > subtotal:
         raise HTTPException(
             status_code=422,
-            detail="Discount cannot exceed the subtotal.",
+            detail="Discount cannot exceed the active-item subtotal.",
         )
 
     taxable_amount = subtotal - discount
@@ -603,6 +463,15 @@ def create_bill(
         discount_amount=discount,
         tax_amount=tax,
         total_amount=total,
+        cancelled_amount=cancelled_amount,
+        # The actor is not stored on individual order items, so it cannot
+        # be reliably inferred when a bill is first created after cancellation.
+        cancelled_by=None,
+        cancelled_at=(
+            datetime.now(timezone.utc)
+            if cancelled_items
+            else None
+        ),
         payment_status="unpaid",
     )
 
@@ -690,4 +559,3 @@ def mark_bill_paid(
         )
 
     return bill
-

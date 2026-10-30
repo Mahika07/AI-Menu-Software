@@ -80,10 +80,21 @@ function escapeHtml(value) {
 }
 
 function printOrderReceipt(order, restaurant, branch) {
-  const itemsHtml = (order.items || [])
-    .map(
-      (item) => `
-        <div class="item">
+  const orderItems = order.items || [];
+  const cancelledItems = orderItems.filter(
+    (item) => (item.status || "pending") === "cancelled",
+  );
+  const cancelledAmount = cancelledItems.reduce(
+    (sum, item) => sum + Number(item.line_total || 0),
+    0,
+  );
+
+  const itemsHtml = orderItems
+    .map((item) => {
+      const isCancelled = (item.status || "pending") === "cancelled";
+
+      return `
+        <div class="item ${isCancelled ? "cancelled-item" : ""}">
           <div class="item-info">
             <strong>${escapeHtml(item.dish_name)}</strong>
             <span>
@@ -95,11 +106,16 @@ function printOrderReceipt(order, restaurant, branch) {
                 ? `<small>Note: ${escapeHtml(item.special_instructions)}</small>`
                 : ""
             }
+            ${
+              isCancelled
+                ? '<small class="cancelled-label">CANCELLED · NOT CHARGED</small>'
+                : ""
+            }
           </div>
           <strong>${formatMoney(item.line_total)}</strong>
         </div>
-      `,
-    )
+      `;
+    })
     .join("");
 
   const receiptWindow = window.open("", "_blank", "width=460,height=720");
@@ -148,6 +164,10 @@ function printOrderReceipt(order, restaurant, branch) {
           }
           .item-info { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
           .item-info small { color: #687482; overflow-wrap: anywhere; }
+          .item.cancelled-item { color: #7b8490; opacity: 0.78; }
+          .item.cancelled-item .item-info > strong,
+          .item.cancelled-item > strong { text-decoration: line-through; }
+          .cancelled-label { color: #b42318 !important; font-weight: 700; }
           .item > strong { white-space: nowrap; }
           .total {
             display: flex;
@@ -217,8 +237,13 @@ function printOrderReceipt(order, restaurant, branch) {
           <h3>Order items</h3>
           ${itemsHtml}
 
+          ${
+            cancelledAmount > 0
+              ? `<div class="total" style="font-size:13px;font-weight:400"><span>Cancelled items (not charged)</span><span>${formatMoney(cancelledAmount)}</span></div>`
+              : ""
+          }
           <div class="total">
-            <span>Total</span>
+            <span>Payable total</span>
             <span>${formatMoney(order.total_amount)}</span>
           </div>
 
@@ -297,19 +322,90 @@ function Orders() {
   const [transactionTotal, setTransactionTotal] = useState(0);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
   const [transactionError, setTransactionError] = useState("");
+
+  // Load restaurants.
   useEffect(() => {
-    setOrders([]);
-    setBills([]);
-    setHistoryOrders([]);
-    setHistoryTotal(0);
-    setHistoryPage(0);
-    setTransactions([]);
-    setTransactionTotal(0);
-    setTransactionPage(0);
-    setError("");
-    setHistoryError("");
-    setTransactionError("");
-  }, [branchId]);
+    let cancelled = false;
+
+    async function loadRestaurants() {
+      try {
+        setLoadingRestaurants(true);
+        setError("");
+
+        const data = await getRestaurants();
+
+        if (cancelled) return;
+
+        setRestaurants(data);
+
+        if (data.length > 0) {
+          setRestaurantId(String(data[0].id));
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err.response?.data?.detail || "Unable to load your restaurants.",
+          );
+        }
+      } finally {
+        if (!cancelled) setLoadingRestaurants(false);
+      }
+    }
+
+    loadRestaurants();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Load branches when the restaurant changes.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadBranches() {
+      setBranches([]);
+      setBranchId("");
+      setOrders([]);
+      setBills([]);
+      setHistoryOrders([]);
+      setHistoryTotal(0);
+      setHistoryPage(0);
+
+      if (!restaurantId) {
+        setLoadingBranches(false);
+        return;
+      }
+
+      try {
+        setLoadingBranches(true);
+        setError("");
+
+        const data = await getBranches(restaurantId);
+
+        if (cancelled) return;
+
+        setBranches(data);
+
+        if (data.length > 0) {
+          setBranchId(String(data[0].id));
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err.response?.data?.detail || "Unable to load branches.");
+        }
+      } finally {
+        if (!cancelled) setLoadingBranches(false);
+      }
+    }
+
+    loadBranches();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [restaurantId]);
+
   // Load live orders.
   const loadOrders = useCallback(
     async (showLoader = false) => {
@@ -707,7 +803,7 @@ function Orders() {
             </div>
           </section>
 
-          {!branchId && !loadingSelection ? (
+          {!branchId && !loadingBranches ? (
             <div className="empty-state">
               <ClipboardList size={38} />
               <h2>No branch selected</h2>
@@ -779,7 +875,17 @@ function Orders() {
                     <div className="owner-order-items">
                       {(order.items || []).map((item, index) => (
                         <div
-                          className="owner-order-item"
+                          className={`owner-order-item ${
+                            item.status === "cancelled" ? "is-cancelled" : ""
+                          }`}
+                          style={
+                            item.status === "cancelled"
+                              ? {
+                                  opacity: 0.65,
+                                  textDecoration: "line-through",
+                                }
+                              : undefined
+                          }
                           key={item.id ?? `${item.dish_name}-${index}`}
                         >
                           <div>
@@ -789,6 +895,20 @@ function Orders() {
 
                             {item.special_instructions && (
                               <p>{item.special_instructions}</p>
+                            )}
+
+                            {item.status === "cancelled" && (
+                              <small
+                                className="cancelled-item-label"
+                                style={{
+                                  display: "block",
+                                  color: "#b42318",
+                                  fontWeight: 700,
+                                  textDecoration: "none",
+                                }}
+                              >
+                                Cancelled · Not charged
+                              </small>
                             )}
                           </div>
 
@@ -1085,10 +1205,30 @@ function Orders() {
                     {(order.items || []).map((item, index) => (
                       <div
                         key={item.id ?? `${item.dish_name}-${index}`}
-                        className="order-history-item"
+                        className={`order-history-item ${
+                          item.status === "cancelled" ? "is-cancelled" : ""
+                        }`}
+                        style={
+                          item.status === "cancelled"
+                            ? { opacity: 0.65, textDecoration: "line-through" }
+                            : undefined
+                        }
                       >
                         <span>
                           {item.quantity} × {item.dish_name}
+                          {item.status === "cancelled" && (
+                            <small
+                              className="cancelled-item-label"
+                              style={{
+                                display: "block",
+                                color: "#b42318",
+                                fontWeight: 700,
+                                textDecoration: "none",
+                              }}
+                            >
+                              Cancelled · Not charged
+                            </small>
+                          )}
                         </span>
                         <span>{formatMoney(item.line_total)}</span>
                       </div>

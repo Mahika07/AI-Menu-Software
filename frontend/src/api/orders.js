@@ -124,7 +124,17 @@ export async function cancelTableOrderItem(qrToken, orderNumber, itemId) {
         return response.data;
     });
 }
+export async function cancelTableOrder(qrToken, orderNumber) {
+    return sessionRequest(qrToken, async (token) => {
+        const response = await api.post(
+            `/public/tables/${encodeURIComponent(token)}/orders/${encodeURIComponent(orderNumber)}/cancel`,
+            {},
+            { headers: getSessionHeaders(token) },
+        );
 
+        return response.data;
+    });
+}
 export async function getBranchOrders(
     branchId,
     statusFilter = "",

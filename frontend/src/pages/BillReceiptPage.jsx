@@ -110,6 +110,8 @@ function BillReceiptPage() {
   };
   const branch = {
     name: bill.branch_name || location.state?.branch?.name || "",
+    address: location.state?.branch?.address || "",
+    phone: location.state?.branch?.phone || "",
   };
 
   return (
