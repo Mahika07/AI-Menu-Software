@@ -297,90 +297,19 @@ function Orders() {
   const [transactionTotal, setTransactionTotal] = useState(0);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
   const [transactionError, setTransactionError] = useState("");
-
-  // Load restaurants.
   useEffect(() => {
-    let cancelled = false;
-
-    async function loadRestaurants() {
-      try {
-        setLoadingRestaurants(true);
-        setError("");
-
-        const data = await getRestaurants();
-
-        if (cancelled) return;
-
-        setRestaurants(data);
-
-        if (data.length > 0) {
-          setRestaurantId(String(data[0].id));
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(
-            err.response?.data?.detail || "Unable to load your restaurants.",
-          );
-        }
-      } finally {
-        if (!cancelled) setLoadingRestaurants(false);
-      }
-    }
-
-    loadRestaurants();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Load branches when the restaurant changes.
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadBranches() {
-      setBranches([]);
-      setBranchId("");
-      setOrders([]);
-      setBills([]);
-      setHistoryOrders([]);
-      setHistoryTotal(0);
-      setHistoryPage(0);
-
-      if (!restaurantId) {
-        setLoadingBranches(false);
-        return;
-      }
-
-      try {
-        setLoadingBranches(true);
-        setError("");
-
-        const data = await getBranches(restaurantId);
-
-        if (cancelled) return;
-
-        setBranches(data);
-
-        if (data.length > 0) {
-          setBranchId(String(data[0].id));
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err.response?.data?.detail || "Unable to load branches.");
-        }
-      } finally {
-        if (!cancelled) setLoadingBranches(false);
-      }
-    }
-
-    loadBranches();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [restaurantId]);
-
+    setOrders([]);
+    setBills([]);
+    setHistoryOrders([]);
+    setHistoryTotal(0);
+    setHistoryPage(0);
+    setTransactions([]);
+    setTransactionTotal(0);
+    setTransactionPage(0);
+    setError("");
+    setHistoryError("");
+    setTransactionError("");
+  }, [branchId]);
   // Load live orders.
   const loadOrders = useCallback(
     async (showLoader = false) => {
@@ -778,7 +707,7 @@ function Orders() {
             </div>
           </section>
 
-          {!branchId && !loadingBranches ? (
+          {!branchId && !loadingSelection ? (
             <div className="empty-state">
               <ClipboardList size={38} />
               <h2>No branch selected</h2>
