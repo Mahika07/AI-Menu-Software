@@ -29,9 +29,8 @@ import POS from "./pages/POS";
 import Reports from "./pages/Reports";
 import BusinessReports from "./pages/BusinessReports";
 import TableStatus from "./pages/TableStatus";
+
 function ProtectedLayout({ children }) {
-  // The provider must be an ancestor of DashboardLayout, Sidebar, and every
-  // dashboard page that calls useBranchSelection().
   return (
     <BranchSelectionProvider>
       <ProtectedRoute>
@@ -214,6 +213,7 @@ function App() {
           path="/reviews"
           element={<Navigate to="/dashboard/reviews" replace />}
         />
+
         <Route
           path="/dashboard/profile"
           element={
@@ -222,6 +222,7 @@ function App() {
             </ProtectedLayout>
           }
         />
+
         <Route
           path="/dashboard/pos"
           element={
@@ -230,7 +231,8 @@ function App() {
             </ProtectedLayout>
           }
         />
-        {/* Consolidated Phase 6 reports and expenses */}
+
+        {/* Consolidated reports and expenses */}
         <Route
           path="/dashboard/business-reports"
           element={
@@ -239,6 +241,7 @@ function App() {
             </ProtectedLayout>
           }
         />
+
         {/* POS Reports */}
         <Route
           path="/dashboard/reports"
@@ -248,6 +251,7 @@ function App() {
             </ProtectedLayout>
           }
         />
+
         {/* Table Status */}
         <Route
           path="/dashboard/table-status"
@@ -266,6 +270,7 @@ function App() {
             </ProtectedLayout>
           }
         />
+
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
