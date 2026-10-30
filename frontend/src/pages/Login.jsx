@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Link } from "react-router-dom";
+import { ShoppingBag } from "lucide-react";
 import { login } from "../api/auth";
 
 function Login() {
@@ -35,6 +36,10 @@ function Login() {
   return (
     <div className="auth-page">
       <form className="auth-card" onSubmit={handleSubmit}>
+        <div className="auth-icon">
+          <ShoppingBag size={26} />
+        </div>
+
         <h1>Smart Menu</h1>
 
         <p className="auth-subtitle">Restaurant Admin</p>

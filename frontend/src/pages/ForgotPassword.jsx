@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { KeyRound } from "lucide-react";
 import { requestPasswordReset } from "../api/auth";
 
 export default function ForgotPassword() {
@@ -25,6 +26,10 @@ export default function ForgotPassword() {
   return (
     <div className="auth-page">
       <form className="auth-card" onSubmit={handleSubmit}>
+        <div className="auth-icon">
+          <KeyRound size={26} />
+        </div>
+
         <h1>Forgot password?</h1>
         <p className="auth-subtitle">Enter your account email and we’ll send a reset link.</p>
         {error && <div className="error-message" role="alert">{error}</div>}

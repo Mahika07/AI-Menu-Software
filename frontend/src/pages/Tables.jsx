@@ -522,6 +522,7 @@ function Tables() {
 
       {/* SUMMARY CARDS */}
       <section
+        className="table-stats-grid"
         aria-label="Table status summary"
         style={{
           display: "grid",

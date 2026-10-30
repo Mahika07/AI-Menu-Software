@@ -4,6 +4,7 @@ import "./index.css";
 import "./dashboard-theme.css";
 import "./pages-theme.css";
 import "./public-menu-theme.css";
+import "./more-pages-theme.css";
 import App from "./App.jsx";
 
 createRoot(document.getElementById("root")).render(

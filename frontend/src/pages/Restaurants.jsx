@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+
 import {
   Store,
   Plus,
@@ -9,6 +10,8 @@ import {
   MapPin,
   ArrowLeft,
   X,
+  ImagePlus,
+  Upload,
 } from "lucide-react";
 
 import {
@@ -16,6 +19,7 @@ import {
   createRestaurant,
   updateRestaurant,
   deleteRestaurant,
+  uploadRestaurantLogo,
 } from "../api/restaurants";
 
 function Restaurants() {
@@ -28,6 +32,9 @@ function Restaurants() {
 
   const [showForm, setShowForm] = useState(false);
   const [editingRestaurant, setEditingRestaurant] = useState(null);
+
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoPreview, setLogoPreview] = useState("");
 
   const [form, setForm] = useState({
     name: "",
@@ -42,6 +49,7 @@ function Restaurants() {
       setError("");
 
       const data = await getRestaurants();
+
       setRestaurants(data);
     } catch (err) {
       console.error(err);
@@ -72,8 +80,11 @@ function Restaurants() {
       logo_url: "",
     });
 
-    setShowForm(true);
+    setLogoFile(null);
+    setLogoPreview("");
+
     setError("");
+    setShowForm(true);
   }
 
   function openEditForm(restaurant) {
@@ -86,8 +97,11 @@ function Restaurants() {
       logo_url: restaurant.logo_url || "",
     });
 
-    setShowForm(true);
+    setLogoFile(null);
+    setLogoPreview(restaurant.logo_url || "");
+
     setError("");
+    setShowForm(true);
   }
 
   function closeForm() {
@@ -95,6 +109,9 @@ function Restaurants() {
 
     setShowForm(false);
     setEditingRestaurant(null);
+    setLogoFile(null);
+    setLogoPreview("");
+    setError("");
   }
 
   function handleChange(event) {
@@ -104,6 +121,48 @@ function Restaurants() {
       ...previous,
       [name]: value,
     }));
+  }
+
+  function handleLogoChange(event) {
+    const file = event.target.files?.[0];
+
+    if (!file) return;
+
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+
+    if (!allowedTypes.includes(file.type)) {
+      setError("Please upload a PNG, JPG or WEBP image.");
+      event.target.value = "";
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Image size must be 5 MB or smaller.");
+      event.target.value = "";
+      return;
+    }
+
+    setError("");
+
+    setLogoFile(file);
+
+    // Preview selected image
+    setLogoPreview(URL.createObjectURL(file));
+  }
+
+  function removeLogo() {
+    setLogoFile(null);
+    setLogoPreview("");
+    setForm((previous) => ({
+      ...previous,
+      logo_url: "",
+    }));
+
+    const input = document.getElementById("restaurant-logo");
+
+    if (input) {
+      input.value = "";
+    }
   }
 
   async function handleSubmit(event) {
@@ -118,11 +177,20 @@ function Restaurants() {
       setSaving(true);
       setError("");
 
+      let uploadedLogoUrl = form.logo_url || null;
+
+      // Upload image first if a new file is selected
+      if (logoFile) {
+        const uploadResult = await uploadRestaurantLogo(logoFile);
+
+        uploadedLogoUrl = uploadResult.url;
+      }
+
       const payload = {
         name: form.name.trim(),
         description: form.description.trim() || null,
         location: form.location.trim() || null,
-        logo_url: form.logo_url.trim() || null,
+        logo_url: uploadedLogoUrl,
       };
 
       if (editingRestaurant) {
@@ -139,7 +207,10 @@ function Restaurants() {
         setRestaurants((previous) => [created, ...previous]);
       }
 
-      closeForm();
+      setShowForm(false);
+      setEditingRestaurant(null);
+      setLogoFile(null);
+      setLogoPreview("");
     } catch (err) {
       console.error(err);
 
@@ -150,9 +221,7 @@ function Restaurants() {
   }
 
   async function handleDelete(restaurant) {
-    const confirmed = window.confirm(
-      `Delete "${restaurant.name}"? This will also delete its branches, menu, tables and related data.`,
-    );
+    const confirmed = window.confirm(`Delete "${restaurant.name}"?`);
 
     if (!confirmed) return;
 
@@ -176,8 +245,9 @@ function Restaurants() {
   }
 
   return (
-    <div className="management-page">
-      {/* Header */}
+    <div className="management-page restaurant-management-page">
+      {/* HEADER */}
+
       <header className="management-header">
         <div className="management-header-left">
           <button
@@ -206,13 +276,15 @@ function Restaurants() {
         </button>
       </header>
 
-      {/* Main */}
+      {/* MAIN CONTENT */}
+
       <main className="management-container">
         {error && <div className="management-error">{error}</div>}
 
         <div className="management-title">
           <div>
             <h1>Your Restaurants</h1>
+
             <p>
               Create and manage restaurants connected to your Smart Menu
               account.
@@ -225,7 +297,8 @@ function Restaurants() {
           </span>
         </div>
 
-        {/* Loading */}
+        {/* LOADING */}
+
         {loading && (
           <div className="empty-state">
             <div className="loading-spinner" />
@@ -233,7 +306,8 @@ function Restaurants() {
           </div>
         )}
 
-        {/* Empty */}
+        {/* EMPTY STATE */}
+
         {!loading && restaurants.length === 0 && (
           <div className="empty-state">
             <div className="empty-icon">
@@ -253,7 +327,8 @@ function Restaurants() {
           </div>
         )}
 
-        {/* Restaurant cards */}
+        {/* RESTAURANT CARDS */}
+
         {!loading && restaurants.length > 0 && (
           <div className="restaurant-grid">
             {restaurants.map((restaurant) => (
@@ -308,8 +383,10 @@ function Restaurants() {
                   onClick={() => openBranches(restaurant)}
                 >
                   <GitBranch size={17} />
-                  Manage Branches
-                  <span>→</span>
+
+                  <span>Manage Branches</span>
+
+                  <span className="branch-arrow">→</span>
                 </button>
               </div>
             ))}
@@ -317,7 +394,8 @@ function Restaurants() {
         )}
       </main>
 
-      {/* Modal */}
+      {/* ADD / EDIT MODAL */}
+
       {showForm && (
         <div
           className="form-modal-overlay"
@@ -351,6 +429,8 @@ function Restaurants() {
             </div>
 
             <form onSubmit={handleSubmit}>
+              {/* RESTAURANT NAME */}
+
               <label>
                 Restaurant Name
                 <input
@@ -362,6 +442,8 @@ function Restaurants() {
                   required
                 />
               </label>
+
+              {/* DESCRIPTION */}
 
               <label>
                 Description
@@ -375,6 +457,8 @@ function Restaurants() {
                 />
               </label>
 
+              {/* LOCATION */}
+
               <label>
                 Location
                 <input
@@ -386,16 +470,53 @@ function Restaurants() {
                 />
               </label>
 
-              <label>
-                Logo URL
-                <input
-                  name="logo_url"
-                  value={form.logo_url}
-                  onChange={handleChange}
-                  placeholder="https://..."
-                  maxLength={500}
-                />
-              </label>
+              {/* LOGO UPLOAD */}
+
+              <div className="restaurant-logo-upload-field">
+                <label htmlFor="restaurant-logo">Restaurant Logo</label>
+
+                <label htmlFor="restaurant-logo" className="logo-upload-box">
+                  <input
+                    id="restaurant-logo"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    onChange={handleLogoChange}
+                    hidden
+                  />
+
+                  <div className="logo-upload-icon">
+                    <ImagePlus size={28} />
+                  </div>
+
+                  <div className="logo-upload-text">
+                    <strong>Click to upload restaurant logo</strong>
+
+                    <span>PNG, JPG or WEBP · Maximum 5 MB</span>
+                  </div>
+
+                  <Upload size={19} />
+                </label>
+
+                {logoPreview && (
+                  <div className="restaurant-logo-preview-wrap">
+                    <img
+                      className="restaurant-logo-preview"
+                      src={logoPreview}
+                      alt="Restaurant logo preview"
+                    />
+
+                    <button
+                      type="button"
+                      className="remove-logo-button"
+                      onClick={removeLogo}
+                    >
+                      Remove image
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* FORM FOOTER */}
 
               <div className="form-modal-footer">
                 <button

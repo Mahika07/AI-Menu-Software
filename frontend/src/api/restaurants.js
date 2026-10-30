@@ -11,16 +11,24 @@ export async function createRestaurant(data) {
 }
 
 export async function updateRestaurant(id, data) {
-    const response = await api.put(
-        `/restaurants/${id}`,
-        data
-    );
+    const response = await api.put(`/restaurants/${id}`, data);
     return response.data;
 }
 
 export async function deleteRestaurant(id) {
-    const response = await api.delete(
-        `/restaurants/${id}`
+    const response = await api.delete(`/restaurants/${id}`);
+    return response.data;
+}
+
+// Upload restaurant logo
+export async function uploadRestaurantLogo(file) {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await api.post(
+        "/restaurants/upload-logo",
+        formData
     );
+
     return response.data;
 }

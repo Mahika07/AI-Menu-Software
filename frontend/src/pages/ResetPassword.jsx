@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { LockKeyhole } from "lucide-react";
 import { resetPassword } from "../api/auth";
 
 export default function ResetPassword() {
@@ -30,6 +31,10 @@ export default function ResetPassword() {
   return (
     <div className="auth-page">
       <form className="auth-card" onSubmit={handleSubmit}>
+        <div className="auth-icon">
+          <LockKeyhole size={26} />
+        </div>
+
         <h1>Set a new password</h1>
         <p className="auth-subtitle">Choose a new password for your Smart Menu account.</p>
         {error && <div className="error-message" role="alert">{error}</div>}
