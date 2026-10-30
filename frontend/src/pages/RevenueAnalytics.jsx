@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getBranchBillAnalytics } from "../api/bills";
+import { useBranchSelection } from "../context/BranchSelectionContext";
 import "./RevenueAnalytics.css";
 
 function toDateInput(date) {
@@ -25,6 +26,12 @@ function formatDate(value) {
 }
 
 export default function RevenueAnalytics() {
+  const {
+    selectedBranch,
+    selectedBranchId,
+    loading: branchLoading,
+  } = useBranchSelection();
+
   const today = new Date();
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(today.getDate() - 29);
@@ -34,11 +41,13 @@ export default function RevenueAnalytics() {
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
   const requestIdRef = useRef(0);
+
+  const branchId = selectedBranchId || selectedBranch?.id || "";
 
   const loadAnalytics = useCallback(async () => {
     const requestId = ++requestIdRef.current;
-    const branchId = localStorage.getItem("selected_branch_id");
 
     if (!branchId) {
       setError("Select a branch before viewing revenue analytics.");
@@ -59,10 +68,13 @@ export default function RevenueAnalytics() {
 
     try {
       const data = await getBranchBillAnalytics(branchId, startDate, endDate);
+
       if (requestId !== requestIdRef.current) return;
+
       setAnalytics(data);
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
+
       setAnalytics(null);
       setError(
         err.response?.data?.detail ||
@@ -73,15 +85,17 @@ export default function RevenueAnalytics() {
         setLoading(false);
       }
     }
-  }, [startDate, endDate]);
+  }, [branchId, startDate, endDate]);
 
   useEffect(() => {
+    if (branchLoading) return;
+
     loadAnalytics();
+
     return () => {
-      // Invalidate in-flight requests when filters change or the page unmounts.
       requestIdRef.current += 1;
     };
-  }, [loadAnalytics]);
+  }, [loadAnalytics, branchLoading]);
 
   const dailyTotals = analytics?.daily_totals || [];
   const paymentMethods = analytics?.payment_methods || [];
@@ -126,7 +140,6 @@ export default function RevenueAnalytics() {
     link.click();
     link.remove();
 
-    // Let the browser begin the download before releasing the temporary URL.
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
@@ -168,9 +181,16 @@ export default function RevenueAnalytics() {
         <div>
           <p className="revenue-eyebrow">BUSINESS OVERVIEW</p>
           <h1>Revenue Analytics</h1>
+
           <p className="revenue-subtitle">
             Track collections, outstanding bills and daily revenue.
           </p>
+
+          {selectedBranch && (
+            <p className="revenue-selected-branch">
+              Branch: <strong>{selectedBranch.name}</strong>
+            </p>
+          )}
         </div>
 
         <div className="revenue-header-actions">
@@ -187,7 +207,7 @@ export default function RevenueAnalytics() {
             className="revenue-refresh"
             type="button"
             onClick={loadAnalytics}
-            disabled={loading}
+            disabled={loading || !branchId}
           >
             {loading ? "Loading..." : "↻ Refresh"}
           </button>
@@ -210,7 +230,7 @@ export default function RevenueAnalytics() {
           <input
             type="date"
             value={endDate}
-            min={startDate || undefined}
+            min={startDate}
             max={toDateInput(today)}
             onChange={(event) => setEndDate(event.target.value)}
           />
@@ -220,7 +240,7 @@ export default function RevenueAnalytics() {
           type="button"
           className="revenue-apply"
           onClick={loadAnalytics}
-          disabled={loading}
+          disabled={loading || !branchId}
         >
           Apply filters
         </button>
@@ -232,7 +252,9 @@ export default function RevenueAnalytics() {
         </div>
       )}
 
-      {loading && !analytics ? (
+      {branchLoading ? (
+        <div className="revenue-empty">Loading branch information...</div>
+      ) : loading && !analytics ? (
         <div className="revenue-empty">Loading revenue data...</div>
       ) : analytics ? (
         <>
@@ -243,6 +265,7 @@ export default function RevenueAnalytics() {
                   <span>{card.label}</span>
                   <span className="revenue-card-icon">{card.icon}</span>
                 </div>
+
                 <strong>{card.value}</strong>
                 <p>{card.detail}</p>
               </article>
@@ -256,6 +279,7 @@ export default function RevenueAnalytics() {
                   <h2>Daily collections</h2>
                   <p>Paid revenue by bill creation date</p>
                 </div>
+
                 <span className="revenue-legend">
                   <i /> Collected
                 </span>
@@ -280,12 +304,14 @@ export default function RevenueAnalytics() {
                         <span className="revenue-bar-value">
                           {amount > 0 ? formatCurrency(amount) : "—"}
                         </span>
+
                         <div className="revenue-bar-track">
                           <div
                             className="revenue-bar"
                             style={{ height: `${height}%` }}
                           />
                         </div>
+
                         <span className="revenue-bar-date">
                           {formatDate(day.date)}
                         </span>
@@ -321,6 +347,7 @@ export default function RevenueAnalytics() {
                         </strong>
                         <span>{method.bill_count} bills</span>
                       </div>
+
                       <strong>{formatCurrency(method.amount)}</strong>
                     </div>
                   ))}
@@ -350,6 +377,7 @@ export default function RevenueAnalytics() {
                       <th>Collected</th>
                     </tr>
                   </thead>
+
                   <tbody>
                     {[...dailyTotals].reverse().map((day) => (
                       <tr key={day.date}>
@@ -367,7 +395,11 @@ export default function RevenueAnalytics() {
             )}
           </section>
         </>
-      ) : null}
+      ) : (
+        <div className="revenue-empty">
+          No revenue data available for this branch and date range.
+        </div>
+      )}
     </main>
   );
 }

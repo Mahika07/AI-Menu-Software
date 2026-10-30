@@ -15,8 +15,6 @@ import {
   Utensils,
 } from "lucide-react";
 
-import { getRestaurants } from "../api/restaurants";
-import { getBranches } from "../api/branches";
 import { getDishes } from "../api/dishes";
 import { getCategories } from "../api/categories";
 import { getTables } from "../api/tables";
@@ -24,7 +22,7 @@ import { createPOSOrder } from "../api/pos";
 import { createCustomer, getCustomers } from "../api/customers";
 import { createBill, markBillPaid } from "../api/bills";
 import { getBranchOrders } from "../api/orders";
-
+import { useBranchSelection } from "../context/BranchSelectionContext";
 import "./POS.css";
 
 const money = (value) =>
@@ -40,10 +38,13 @@ const toAmount = (value) =>
 export default function POS() {
   const navigate = useNavigate();
 
-  const [branches, setBranches] = useState([]);
-  const [branchId, setBranchId] = useState(
-    localStorage.getItem("selected_branch_id") || "",
-  );
+  const {
+    selectedBranchId,
+    selectedRestaurantId,
+    loading: loadingSelection,
+  } = useBranchSelection();
+
+  const branchId = selectedBranchId;
 
   const [dishes, setDishes] = useState([]);
   const [menuCategories, setMenuCategories] = useState([]);
@@ -74,62 +75,25 @@ export default function POS() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-
-  // Load restaurants and branches belonging to the signed-in account.
   useEffect(() => {
-    let cancelled = false;
+    // Never carry an unfinished order into another branch.
+    setCart([]);
+    setTableId("");
 
-    async function loadBranches() {
-      try {
-        const restaurants = await getRestaurants();
+    setCustomerName("");
+    setCustomerNumber("");
+    setCustomerNote("");
+    setCustomerId(null);
+    setCustomerSearch("");
+    setCustomerResults([]);
 
-        const groups = await Promise.all(
-          (Array.isArray(restaurants) ? restaurants : []).map(
-            async (restaurant) => {
-              const rows = await getBranches(restaurant.id);
+    setDiscount("0");
+    setTaxRate("0");
+    setCollectPayment(false);
 
-              return (Array.isArray(rows) ? rows : []).map((branch) => ({
-                ...branch,
-                restaurant_name: restaurant.name,
-              }));
-            },
-          ),
-        );
-
-        const allBranches = groups.flat();
-
-        if (cancelled) return;
-
-        setBranches(allBranches);
-
-        const saved = localStorage.getItem("selected_branch_id") || "";
-
-        const initial = allBranches.some((item) => String(item.id) === saved)
-          ? saved
-          : String(allBranches[0]?.id || "");
-
-        setBranchId(initial);
-
-        if (initial) {
-          localStorage.setItem("selected_branch_id", initial);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(
-            err.response?.data?.detail ||
-              "Could not load your restaurant branches.",
-          );
-        }
-      }
-    }
-
-    loadBranches();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
+    setError("");
+    setNotice("");
+  }, [branchId]);
   // Search saved customers only within the currently selected branch.
   useEffect(() => {
     if (!branchId || !customerSearch.trim()) {
@@ -171,7 +135,11 @@ export default function POS() {
   function selectCustomer(customer) {
     setCustomerId(customer.id);
     setCustomerName(customer.name || "");
-    setCustomerNumber(String(customer.phone || "").replace(/\D/g, "").slice(0, 10));
+    setCustomerNumber(
+      String(customer.phone || "")
+        .replace(/\D/g, "")
+        .slice(0, 10),
+    );
     setCustomerSearch(customer.name || customer.phone || "");
     setCustomerResults([]);
     setNotice(`Selected saved customer: ${customer.name}.`);
@@ -200,7 +168,9 @@ export default function POS() {
       setCustomerId(customer.id);
       setCustomerSearch(customer.name || customerName.trim());
       setCustomerResults([]);
-      setNotice(`Customer ${customer.name || customerName.trim()} saved successfully.`);
+      setNotice(
+        `Customer ${customer.name || customerName.trim()} saved successfully.`,
+      );
     } catch (err) {
       const detail = err.response?.data?.detail;
       setError(
@@ -563,7 +533,28 @@ export default function POS() {
       setSubmitting(false);
     }
   }
+  if (loadingSelection) {
+    return (
+      <main className="pos-page">
+        <div className="pos-loading">Loading restaurant and branch...</div>
+      </main>
+    );
+  }
 
+  if (!branchId) {
+    return (
+      <main className="pos-page">
+        <div className="pos-empty-state">
+          <Utensils size={32} />
+          <h2>No branch selected</h2>
+          <p>
+            Select a restaurant and branch from the dashboard header to start
+            using POS.
+          </p>
+        </div>
+      </main>
+    );
+  }
   return (
     <main className="pos-page">
       <header className="pos-header">
@@ -575,38 +566,6 @@ export default function POS() {
             received payments.
           </p>
         </div>
-
-        <label className="pos-branch-picker">
-          <span>Branch</span>
-          <select
-            value={branchId}
-            onChange={(event) => {
-              const value = event.target.value;
-
-              setBranchId(value);
-
-              if (value) {
-                localStorage.setItem("selected_branch_id", value);
-              }
-
-              setCart([]);
-              setTableId("");
-              setCustomerId(null);
-              setCustomerSearch("");
-              setCustomerResults([]);
-              setError("");
-              setNotice("");
-            }}
-          >
-            <option value="">Select a branch</option>
-
-            {branches.map((branch) => (
-              <option key={branch.id} value={String(branch.id)}>
-                {branch.restaurant_name} · {branch.name}
-              </option>
-            ))}
-          </select>
-        </label>
       </header>
 
       {error && (
@@ -777,26 +736,43 @@ export default function POS() {
               {customerSearchLoading && (
                 <small className="pos-field-help">Searching customers…</small>
               )}
-              {!customerSearchLoading && customerSearch.trim() && customerResults.length > 0 && (
-                <div className="pos-customer-results" role="listbox" aria-label="Customer search results">
-                  {customerResults.map((customer) => (
-                    <button
-                      key={customer.id}
-                      className="pos-customer-result"
-                      type="button"
-                      onClick={() => selectCustomer(customer)}
-                    >
-                      <strong>{customer.name}</strong>
-                      <span>{customer.phone}{customer.email ? ` · ${customer.email}` : ""}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              {!customerSearchLoading && customerSearch.trim() && !customerResults.length && (
-                <small className="pos-field-help">No saved customer found. You can enter their details below and save them.</small>
-              )}
+              {!customerSearchLoading &&
+                customerSearch.trim() &&
+                customerResults.length > 0 && (
+                  <div
+                    className="pos-customer-results"
+                    role="listbox"
+                    aria-label="Customer search results"
+                  >
+                    {customerResults.map((customer) => (
+                      <button
+                        key={customer.id}
+                        className="pos-customer-result"
+                        type="button"
+                        onClick={() => selectCustomer(customer)}
+                      >
+                        <strong>{customer.name}</strong>
+                        <span>
+                          {customer.phone}
+                          {customer.email ? ` · ${customer.email}` : ""}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              {!customerSearchLoading &&
+                customerSearch.trim() &&
+                !customerResults.length && (
+                  <small className="pos-field-help">
+                    No saved customer found. You can enter their details below
+                    and save them.
+                  </small>
+                )}
               {customerId && (
-                <small className="pos-field-help">Saved customer selected — this order will be linked to their history.</small>
+                <small className="pos-field-help">
+                  Saved customer selected — this order will be linked to their
+                  history.
+                </small>
               )}
             </div>
 
@@ -821,7 +797,9 @@ export default function POS() {
                 autoComplete="tel-national"
                 value={customerNumber}
                 onChange={(event) => {
-                  setCustomerNumber(event.target.value.replace(/\D/g, "").slice(0, 10));
+                  setCustomerNumber(
+                    event.target.value.replace(/\D/g, "").slice(0, 10),
+                  );
                   setCustomerId(null);
                 }}
                 placeholder="10-digit mobile number"
@@ -837,16 +815,20 @@ export default function POS() {
               </small>
             </label>
 
-            {!customerId && customerName.trim() && /^[6-9]\d{9}$/.test(customerNumber) && (
-              <button
-                className="pos-link-button"
-                type="button"
-                onClick={saveCurrentCustomer}
-                disabled={customerSaving}
-              >
-                {customerSaving ? "Saving customer…" : "Save as a customer record"}
-              </button>
-            )}
+            {!customerId &&
+              customerName.trim() &&
+              /^[6-9]\d{9}$/.test(customerNumber) && (
+                <button
+                  className="pos-link-button"
+                  type="button"
+                  onClick={saveCurrentCustomer}
+                  disabled={customerSaving}
+                >
+                  {customerSaving
+                    ? "Saving customer…"
+                    : "Save as a customer record"}
+                </button>
+              )}
 
             <label className="pos-field">
               <span>Order note (optional)</span>

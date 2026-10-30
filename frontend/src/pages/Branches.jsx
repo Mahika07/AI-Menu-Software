@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   GitBranch,
@@ -22,13 +22,12 @@ import {
   deleteBranch,
 } from "../api/branches";
 
-// Convert FastAPI/Pydantic errors into safe, readable strings.
+import { useBranchSelection } from "../context/BranchSelectionContext";
+
 function getErrorMessage(err, fallback = "Something went wrong.") {
   const detail = err?.response?.data?.detail;
 
-  if (typeof detail === "string") {
-    return detail;
-  }
+  if (typeof detail === "string") return detail;
 
   if (Array.isArray(detail)) {
     return detail
@@ -59,10 +58,13 @@ function Branches() {
   const navigate = useNavigate();
   const { restaurantId } = useParams();
 
+  const {
+    selectedBranchId,
+    selectedRestaurantId,
+    selectBranch: setGlobalBranch,
+  } = useBranchSelection();
+
   const [branches, setBranches] = useState([]);
-  const [selectedBranchId, setSelectedBranchId] = useState(
-    localStorage.getItem("selected_branch_id"),
-  );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -78,89 +80,79 @@ function Branches() {
     phone: "",
   });
 
-  // --------------------------------------------------
-  // Error handling
-  // --------------------------------------------------
+  const handleApiError = useCallback(
+    (err, fallback) => {
+      console.error(err);
 
-  function handleApiError(err, fallback) {
-    console.error(err);
+      if (err.response?.status === 401) {
+        localStorage.removeItem("access_token");
+        navigate("/login");
+        return;
+      }
 
-    if (err.response?.status === 401) {
-      localStorage.removeItem("access_token");
-      navigate("/login");
-      return;
-    }
+      setError(getErrorMessage(err, fallback));
+    },
+    [navigate],
+  );
 
-    setError(getErrorMessage(err, fallback));
+  // Always update the shared global selection.
+  function selectThisBranch(branch) {
+    if (!branch?.id || !branch.is_active) return;
+
+    setGlobalBranch(branch, restaurantId);
   }
 
-  // --------------------------------------------------
-  // Select branch
-  // --------------------------------------------------
-
-  function selectBranch(branch) {
-    if (!branch?.id || !branch.is_active) {
-      return;
-    }
-
-    const branchId = String(branch.id);
-
-    localStorage.setItem("selected_branch_id", branchId);
-    localStorage.setItem("selected_restaurant_id", String(restaurantId));
-
-    // Immediately update React UI
-    setSelectedBranchId(branchId);
-  }
-
-  // --------------------------------------------------
-  // Automatically select a valid branch
-  // --------------------------------------------------
-
+  // Keep the selected branch valid for this restaurant.
   function syncSelectedBranch(branchList) {
     const activeBranches = branchList.filter((branch) => branch.is_active);
 
     if (activeBranches.length === 0) {
-      localStorage.removeItem("selected_branch_id");
-      setSelectedBranchId(null);
+      if (String(selectedRestaurantId) === String(restaurantId)) {
+        setGlobalBranch(null, restaurantId);
+      }
       return;
     }
 
-    const currentSelectedId = localStorage.getItem("selected_branch_id");
-
     const currentSelectedBranch = activeBranches.find(
-      (branch) => String(branch.id) === String(currentSelectedId),
+      (branch) => String(branch.id) === String(selectedBranchId),
     );
 
     if (currentSelectedBranch) {
-      setSelectedBranchId(String(currentSelectedBranch.id));
       return;
     }
 
-    selectBranch(activeBranches[0]);
-  }
-  // --------------------------------------------------
-  // Load branches
-  // --------------------------------------------------
+    // Do not override a valid selection belonging to another restaurant.
+    if (
+      selectedRestaurantId &&
+      String(selectedRestaurantId) !== String(restaurantId)
+    ) {
+      return;
+    }
 
-  async function loadBranches() {
+    setGlobalBranch(activeBranches[0], restaurantId);
+  }
+
+  const loadBranches = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
 
       const data = await getBranches(restaurantId);
 
-      setBranches(data);
-      syncSelectedBranch(data);
+      const list = Array.isArray(data) ? data : [];
+
+      setBranches(list);
+      syncSelectedBranch(list);
     } catch (err) {
       handleApiError(err, "Unable to load branches.");
     } finally {
       setLoading(false);
     }
-  }
+  }, [restaurantId, selectedBranchId, selectedRestaurantId, handleApiError]);
 
   useEffect(() => {
     loadBranches();
-  }, [restaurantId]);
+  }, [loadBranches]);
 
   // --------------------------------------------------
   // Form
@@ -175,6 +167,8 @@ function Branches() {
       phone: "",
     });
 
+    setFieldErrors({});
+    setSubmitted(false);
     setError("");
     setShowForm(true);
   }
@@ -188,6 +182,8 @@ function Branches() {
       phone: branch.phone || "",
     });
 
+    setFieldErrors({});
+    setSubmitted(false);
     setError("");
     setShowForm(true);
   }
@@ -197,11 +193,15 @@ function Branches() {
 
     setShowForm(false);
     setEditingBranch(null);
+
     setForm({
       name: "",
       address: "",
       phone: "",
     });
+
+    setFieldErrors({});
+    setSubmitted(false);
     setError("");
   }
 
@@ -257,57 +257,24 @@ function Branches() {
       }));
     }
   }
+
+  function validateForm() {
+    const errors = validateValues(form);
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
+  }
+
   // --------------------------------------------------
   // Create / Update branch
   // --------------------------------------------------
-  function validateForm() {
-    const errors = {};
 
-    const name = form.name.trim();
-    const address = form.address.trim();
-    const phone = form.phone.trim();
-
-    // Branch name
-    if (!name) {
-      errors.name = "Branch name is required.";
-    } else if (name.length < 2) {
-      errors.name = "Branch name must contain at least 2 characters.";
-    } else if (name.length > 150) {
-      errors.name = "Branch name cannot exceed 150 characters.";
-    }
-
-    // Address
-    if (!address) {
-      errors.address = "Branch address is required.";
-    } else if (address.length < 5) {
-      errors.address = "Address must contain at least 5 characters.";
-    } else if (address.length > 500) {
-      errors.address = "Address cannot exceed 500 characters.";
-    }
-
-    // Phone (optional)
-    if (phone) {
-      if (!/^[0-9+\-\s()]{7,20}$/.test(phone)) {
-        errors.phone = "Enter a valid phone number (7–20 characters).";
-      }
-    }
-
-    setFieldErrors(errors);
-
-    return Object.keys(errors).length === 0;
-  }
   async function handleSubmit(event) {
     event.preventDefault();
 
     setSubmitted(true);
     setError("");
 
-    // Validate every field before making an API request
-    const isValid = validateForm();
-
-    if (!isValid) {
-      return;
-    }
+    if (!validateForm()) return;
 
     try {
       setSaving(true);
@@ -318,6 +285,8 @@ function Branches() {
         phone: form.phone.trim() || null,
       };
 
+      let updatedBranches;
+
       if (editingBranch) {
         const updated = await updateBranch(
           restaurantId,
@@ -325,24 +294,16 @@ function Branches() {
           payload,
         );
 
-        setBranches((previous) => {
-          const updatedBranches = previous.map((branch) =>
-            branch.id === updated.id ? updated : branch,
-          );
-
-          syncSelectedBranch(updatedBranches);
-          return updatedBranches;
-        });
+        updatedBranches = branches.map((branch) =>
+          String(branch.id) === String(updated.id) ? updated : branch,
+        );
       } else {
         const created = await createBranch(restaurantId, payload);
-
-        setBranches((previous) => {
-          const updatedBranches = [created, ...previous];
-
-          syncSelectedBranch(updatedBranches);
-          return updatedBranches;
-        });
+        updatedBranches = [created, ...branches];
       }
+
+      setBranches(updatedBranches);
+      syncSelectedBranch(updatedBranches);
 
       setShowForm(false);
       setEditingBranch(null);
@@ -361,6 +322,7 @@ function Branches() {
       setSaving(false);
     }
   }
+
   // --------------------------------------------------
   // Delete branch
   // --------------------------------------------------
@@ -377,22 +339,17 @@ function Branches() {
 
       await deleteBranch(restaurantId, branch.id);
 
-      setBranches((previous) => {
-        const updatedBranches = previous.filter(
-          (item) => item.id !== branch.id,
-        );
+      const updatedBranches = branches.filter(
+        (item) => String(item.id) !== String(branch.id),
+      );
 
-        const selectedId = localStorage.getItem("selected_branch_id");
+      setBranches(updatedBranches);
 
-        if (String(branch.id) === String(selectedId)) {
-          localStorage.removeItem("selected_branch_id");
-          setSelectedBranchId(null);
-        }
+      if (String(branch.id) === String(selectedBranchId)) {
+        setGlobalBranch(null, restaurantId);
+      }
 
-        syncSelectedBranch(updatedBranches);
-
-        return updatedBranches;
-      });
+      syncSelectedBranch(updatedBranches);
     } catch (err) {
       handleApiError(err, "Unable to delete branch.");
     }
@@ -410,15 +367,20 @@ function Branches() {
         is_active: !branch.is_active,
       });
 
-      setBranches((previous) => {
-        const updatedBranches = previous.map((item) =>
-          item.id === updated.id ? updated : item,
-        );
+      const updatedBranches = branches.map((item) =>
+        String(item.id) === String(updated.id) ? updated : item,
+      );
 
-        syncSelectedBranch(updatedBranches);
+      setBranches(updatedBranches);
 
-        return updatedBranches;
-      });
+      if (
+        !updated.is_active &&
+        String(updated.id) === String(selectedBranchId)
+      ) {
+        setGlobalBranch(null, restaurantId);
+      }
+
+      syncSelectedBranch(updatedBranches);
     } catch (err) {
       handleApiError(err, "Unable to update branch.");
     }
@@ -429,7 +391,7 @@ function Branches() {
   // --------------------------------------------------
 
   function openMenu(branch) {
-    selectBranch(branch);
+    selectThisBranch(branch);
 
     navigate(
       `/dashboard/restaurants/${restaurantId}/branches/${branch.id}/menu`,
@@ -437,7 +399,7 @@ function Branches() {
   }
 
   function openTables(branch) {
-    selectBranch(branch);
+    selectThisBranch(branch);
 
     navigate(
       `/dashboard/restaurants/${restaurantId}/branches/${branch.id}/tables`,
@@ -445,27 +407,20 @@ function Branches() {
   }
 
   function openAnalytics(branch) {
-    selectBranch(branch);
+    selectThisBranch(branch);
     navigate("/dashboard/analytics");
   }
 
   function openReviews(branch) {
-    selectBranch(branch);
+    selectThisBranch(branch);
     navigate("/dashboard/reviews");
   }
 
-  // --------------------------------------------------
-  // Render
-  // --------------------------------------------------
-
   const addressLength = form.address.trim().length;
-
   const addressTooShort = addressLength > 0 && addressLength < 5;
 
   return (
     <div className="management-page">
-      {/* Header */}
-
       <header className="management-header">
         <div className="management-header-left">
           <button
@@ -494,8 +449,6 @@ function Branches() {
         </button>
       </header>
 
-      {/* Main */}
-
       <main className="management-container">
         {error && (
           <div className="management-error" role="alert">
@@ -506,7 +459,6 @@ function Branches() {
         <div className="management-title">
           <div>
             <h1>Restaurant Branches</h1>
-
             <p>Manage locations, menus and tables for this restaurant.</p>
           </div>
 
@@ -516,16 +468,12 @@ function Branches() {
           </span>
         </div>
 
-        {/* Loading */}
-
         {loading && (
           <div className="empty-state">
             <div className="loading-spinner" />
             <p>Loading branches...</p>
           </div>
         )}
-
-        {/* Empty */}
 
         {!loading && branches.length === 0 && (
           <div className="empty-state">
@@ -547,12 +495,12 @@ function Branches() {
           </div>
         )}
 
-        {/* Branch cards */}
-
         {!loading && branches.length > 0 && (
           <div className="branch-grid">
             {branches.map((branch) => {
-              const isSelected = String(branch.id) === String(selectedBranchId);
+              const isSelected =
+                String(branch.id) === String(selectedBranchId) &&
+                String(selectedRestaurantId) === String(restaurantId);
 
               return (
                 <div
@@ -627,8 +575,6 @@ function Branches() {
                     </div>
                   )}
 
-                  {/* Select branch */}
-
                   {branch.is_active && (
                     <button
                       type="button"
@@ -637,7 +583,7 @@ function Branches() {
                           ? "branch-selected-button"
                           : "branch-select-button"
                       }
-                      onClick={() => selectBranch(branch)}
+                      onClick={() => selectThisBranch(branch)}
                     >
                       {isSelected ? "✓ Current Branch" : "Use This Branch"}
                     </button>
@@ -662,8 +608,6 @@ function Branches() {
                     </button>
                   </div>
 
-                  {/* Analytics / Reviews */}
-
                   {branch.is_active && (
                     <div className="branch-secondary-actions">
                       <button
@@ -686,8 +630,6 @@ function Branches() {
           </div>
         )}
       </main>
-
-      {/* Add / Edit Modal */}
 
       {showForm && (
         <div
@@ -744,10 +686,15 @@ function Branches() {
                   placeholder="Complete branch address"
                   maxLength={500}
                   rows={4}
-                  aria-invalid={Boolean(fieldErrors.name)}
+                  aria-invalid={Boolean(fieldErrors.address)}
                 />
                 {fieldErrors.address && (
                   <small className="field-error">{fieldErrors.address}</small>
+                )}
+                {addressTooShort && !submitted && (
+                  <small className="field-hint">
+                    Enter at least 5 characters.
+                  </small>
                 )}
               </label>
 
@@ -759,7 +706,7 @@ function Branches() {
                   onChange={handleChange}
                   placeholder="e.g. +91 9876543210"
                   maxLength={20}
-                  aria-invalid={Boolean(fieldErrors.name)}
+                  aria-invalid={Boolean(fieldErrors.phone)}
                 />
                 {fieldErrors.phone && (
                   <small className="field-error">{fieldErrors.phone}</small>

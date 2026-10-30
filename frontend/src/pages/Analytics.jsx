@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 
 import { getBranchAnalytics } from "../api/analytics";
-import { getBranches } from "../api/branches";
+import { useBranchSelection } from "../context/BranchSelectionContext";
 
 function formatNumber(value) {
   return new Intl.NumberFormat("en-IN").format(value || 0);
@@ -96,7 +96,6 @@ function ActivityChart({ trends }) {
   const paddingBottom = 45;
 
   const chartWidth = width - paddingLeft - paddingRight;
-
   const chartHeight = height - paddingTop - paddingBottom;
 
   const points = chartData.map((item, index) => {
@@ -276,88 +275,28 @@ function ActivityChart({ trends }) {
 }
 
 function Analytics() {
-  const [analytics, setAnalytics] = useState(null);
+  const {
+    selectedBranch,
+    selectedBranchId,
+    loading: loadingSelection,
+  } = useBranchSelection();
 
+  const branchId = selectedBranchId;
+
+  const [analytics, setAnalytics] = useState(null);
   const [days, setDays] = useState(7);
 
-  const [branches, setBranches] = useState([]);
-
-  const [branchId, setBranchId] = useState(
-    localStorage.getItem("selected_branch_id") || "",
-  );
-
-  const [branchesLoading, setBranchesLoading] = useState(true);
-
   const [loading, setLoading] = useState(true);
-
   const [refreshing, setRefreshing] = useState(false);
 
   const [error, setError] = useState("");
 
-  async function loadBranches() {
-    try {
-      setBranchesLoading(true);
-
-      const restaurantId = localStorage.getItem("selected_restaurant_id");
-
-      if (!restaurantId) {
-        setError("No restaurant selected.");
-        setBranches([]);
-        setBranchId("");
-        return;
-      }
-
-      const data = await getBranches(restaurantId);
-
-      const activeBranches = data.filter(
-        (branch) => branch.is_active !== false,
-      );
-
-      setBranches(activeBranches);
-
-      if (!activeBranches.length) {
-        setBranchId("");
-
-        localStorage.removeItem("selected_branch_id");
-
-        return;
-      }
-
-      const savedBranchId = localStorage.getItem("selected_branch_id");
-
-      const savedBranchExists = activeBranches.some(
-        (branch) => String(branch.id) === String(savedBranchId),
-      );
-
-      if (savedBranchExists) {
-        setBranchId(String(savedBranchId));
-      } else {
-        const firstBranch = activeBranches[0];
-
-        setBranchId(String(firstBranch.id));
-
-        localStorage.setItem("selected_branch_id", String(firstBranch.id));
-
-        if (firstBranch.restaurant_id) {
-          localStorage.setItem(
-            "selected_restaurant_id",
-            String(firstBranch.restaurant_id),
-          );
-        }
-      }
-    } catch (err) {
-      console.error("Failed to load branches:", err);
-
-      setError(err.response?.data?.detail || "Failed to load branches.");
-    } finally {
-      setBranchesLoading(false);
-    }
-  }
-
+  // Load analytics for the globally selected branch.
   async function loadAnalytics(selectedDays = days, showRefresh = false) {
     if (!branchId) {
       setAnalytics(null);
       setLoading(false);
+      setRefreshing(false);
       return;
     }
 
@@ -383,42 +322,53 @@ function Analytics() {
     }
   }
 
+  // Automatically reload whenever the global branch or date period changes.
   useEffect(() => {
-    loadBranches();
-  }, []);
+    if (loadingSelection) return;
 
-  useEffect(() => {
-    if (!branchesLoading && branchId) {
-      loadAnalytics(days);
+    if (!branchId) {
+      setAnalytics(null);
+      setLoading(false);
+      return;
     }
-  }, [branchId, days, branchesLoading]);
 
-  function handleBranchChange(event) {
-    const newBranchId = event.target.value;
+    let cancelled = false;
 
-    setBranchId(newBranchId);
+    async function fetchAnalytics() {
+      setLoading(true);
+      setError("");
 
-    localStorage.setItem("selected_branch_id", newBranchId);
+      try {
+        const data = await getBranchAnalytics(branchId, days);
 
-    const selectedBranch = branches.find(
-      (branch) => String(branch.id) === String(newBranchId),
-    );
+        if (!cancelled) {
+          setAnalytics(data);
+        }
+      } catch (err) {
+        console.error("Analytics error:", err);
 
-    if (selectedBranch?.restaurant_id) {
-      localStorage.setItem(
-        "selected_restaurant_id",
-        String(selectedBranch.restaurant_id),
-      );
+        if (!cancelled) {
+          setError(err.response?.data?.detail || "Failed to load analytics.");
+
+          setAnalytics(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
     }
-  }
+
+    fetchAnalytics();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [branchId, days, loadingSelection]);
 
   function handleDaysChange(value) {
     setDays(value);
   }
-
-  const selectedBranch = branches.find(
-    (branch) => String(branch.id) === String(branchId),
-  );
 
   function getProgressWidth(views) {
     if (!analytics?.popular_dishes?.length) {
@@ -434,7 +384,8 @@ function Analytics() {
     return Math.max(5, Math.round((views / maxViews) * 100));
   }
 
-  if (loading) {
+  // Loading
+  if (loadingSelection || loading) {
     return (
       <div className="analytics-page">
         <div className="analytics-loading">
@@ -446,6 +397,25 @@ function Analytics() {
     );
   }
 
+  // No selected branch
+  if (!branchId) {
+    return (
+      <div className="analytics-page">
+        <div className="analytics-empty">
+          <GitBranch size={28} />
+
+          <h3>No branch selected</h3>
+
+          <p>
+            Select a restaurant and branch from the dashboard header to view
+            analytics.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error
   if (error) {
     return (
       <div className="analytics-page">
@@ -457,30 +427,11 @@ function Analytics() {
           </div>
 
           <div className="analytics-header-actions">
-            <div className="analytics-branch-selector">
-              <GitBranch size={17} />
-
-              <select
-                value={branchId}
-                onChange={handleBranchChange}
-                disabled={branchesLoading || !branches.length}
-              >
-                {!branches.length ? (
-                  <option value="">No branches</option>
-                ) : (
-                  branches.map((branch) => (
-                    <option key={branch.id} value={branch.id}>
-                      {branch.name}
-                    </option>
-                  ))
-                )}
-              </select>
-            </div>
-
             <button
               type="button"
               onClick={() => loadAnalytics(days)}
               className="analytics-retry-btn"
+              disabled={refreshing}
             >
               Try Again
             </button>
@@ -528,27 +479,6 @@ function Analytics() {
         </div>
 
         <div className="analytics-header-actions">
-          {/* Branch Selector */}
-          <div className="analytics-branch-selector">
-            <GitBranch size={17} />
-
-            <select
-              value={branchId}
-              onChange={handleBranchChange}
-              disabled={branchesLoading || !branches.length}
-            >
-              {!branches.length ? (
-                <option value="">No branches</option>
-              ) : (
-                branches.map((branch) => (
-                  <option key={branch.id} value={branch.id}>
-                    {branch.name}
-                  </option>
-                ))
-              )}
-            </select>
-          </div>
-
           {/* Refresh */}
           <button
             type="button"
@@ -566,7 +496,7 @@ function Analytics() {
         </div>
       </div>
 
-      {/* Selected Branch */}
+      {/* Selected Branch Information */}
       {selectedBranch && (
         <div className="analytics-selected-branch">
           <GitBranch size={16} />

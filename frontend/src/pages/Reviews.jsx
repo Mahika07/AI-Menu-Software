@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { MessageSquare, Star, RefreshCw, GitBranch } from "lucide-react";
 
 import { getOwnerReviews } from "../api/ownerReviews";
-import { getBranches } from "../api/branches";
+import { useBranchSelection } from "../context/BranchSelectionContext";
 
 function formatDate(value) {
   if (!value) return "";
@@ -29,148 +29,139 @@ function RatingStars({ rating }) {
 }
 
 export default function Reviews() {
-  const [branches, setBranches] = useState([]);
-  const [branchId, setBranchId] = useState(
-    localStorage.getItem("selected_branch_id") || "",
-  );
+  // Read the globally selected branch.
+  const {
+    selectedBranch,
+    selectedBranchId,
+    loading: loadingSelection,
+  } = useBranchSelection();
 
-  const [branchesLoading, setBranchesLoading] = useState(true);
+  const branchId = selectedBranchId;
 
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
 
-  async function loadBranches() {
-    try {
-      setBranchesLoading(true);
+  // Load reviews for the globally selected branch.
+  useEffect(() => {
+    if (loadingSelection) return;
 
-      const restaurantId = localStorage.getItem("selected_restaurant_id");
-
-      if (!restaurantId) {
-        setError("No restaurant selected.");
-        return;
-      }
-
-      const data = await getBranches(restaurantId);
-
-      const activeBranches = data.filter(
-        (branch) => branch.is_active !== false,
-      );
-
-      setBranches(activeBranches);
-
-      if (!activeBranches.length) {
-        setBranchId("");
-        localStorage.removeItem("selected_branch_id");
-        return;
-      }
-
-      const savedBranchId = localStorage.getItem("selected_branch_id");
-
-      const savedBranchExists = activeBranches.some(
-        (branch) => String(branch.id) === String(savedBranchId),
-      );
-
-      if (savedBranchExists) {
-        setBranchId(String(savedBranchId));
-      } else {
-        const firstBranch = activeBranches[0];
-
-        setBranchId(String(firstBranch.id));
-
-        localStorage.setItem("selected_branch_id", String(firstBranch.id));
-      }
-    } catch (err) {
-      console.error("Failed to load branches:", err);
-
-      setError(err.response?.data?.detail || "Failed to load branches.");
-    } finally {
-      setBranchesLoading(false);
-    }
-  }
-
-  async function loadReviews(showRefresh = false) {
     if (!branchId) {
       setReviews([]);
       setLoading(false);
+      setRefreshing(false);
+      setError("");
       return;
     }
 
-    try {
-      if (showRefresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
+    let cancelled = false;
 
+    async function loadReviews() {
+      try {
+        setLoading(true);
+        setError("");
+
+        // Clear old branch reviews while the new branch loads.
+        setReviews([]);
+
+        const data = await getOwnerReviews(branchId);
+
+        if (!cancelled) {
+          setReviews(Array.isArray(data) ? data : []);
+        }
+      } catch (err) {
+        console.error("Failed to load reviews:", err);
+
+        if (!cancelled) {
+          setReviews([]);
+          setError(err.response?.data?.detail || "Failed to load reviews.");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadReviews();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [branchId, loadingSelection]);
+
+  // Manual refresh.
+  async function handleRefresh() {
+    if (!branchId || refreshing) return;
+
+    try {
+      setRefreshing(true);
       setError("");
 
       const data = await getOwnerReviews(branchId);
 
-      setReviews(data);
+      // Prevent showing results for a branch that has since changed.
+      if (String(branchId) === String(selectedBranchId)) {
+        setReviews(Array.isArray(data) ? data : []);
+      }
     } catch (err) {
-      console.error("Failed to load reviews:", err);
+      console.error("Failed to refresh reviews:", err);
 
-      setError(err.response?.data?.detail || "Failed to load reviews.");
+      setError(err.response?.data?.detail || "Failed to refresh reviews.");
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
   }
 
-  useEffect(() => {
-    loadBranches();
-  }, []);
-
-  useEffect(() => {
-    if (!branchesLoading) {
-      loadReviews();
-    }
-  }, [branchId, branchesLoading]);
-
-  function handleBranchChange(event) {
-    const newBranchId = event.target.value;
-
-    setBranchId(newBranchId);
-
-    localStorage.setItem("selected_branch_id", newBranchId);
-
-    const selectedBranch = branches.find(
-      (branch) => String(branch.id) === String(newBranchId),
-    );
-
-    if (selectedBranch?.restaurant_id) {
-      localStorage.setItem(
-        "selected_restaurant_id",
-        String(selectedBranch.restaurant_id),
-      );
-    }
-  }
-
-  const selectedBranch = branches.find(
-    (branch) => String(branch.id) === String(branchId),
-  );
-
+  // Average rating.
   const averageRating = useMemo(() => {
     if (!reviews.length) return 0;
 
-    const total = reviews.reduce((sum, review) => sum + review.rating, 0);
+    const total = reviews.reduce(
+      (sum, review) => sum + Number(review.rating || 0),
+      0,
+    );
 
     return (total / reviews.length).toFixed(1);
   }, [reviews]);
 
+  // Rating distribution.
   const ratingDistribution = useMemo(() => {
     return [5, 4, 3, 2, 1].map((rating) => ({
       rating,
-      count: reviews.filter((review) => review.rating === rating).length,
+      count: reviews.filter((review) => Number(review.rating) === rating)
+        .length,
     }));
   }, [reviews]);
 
-  if (loading && !reviews.length) {
+  // Initial loading.
+  if (loadingSelection || loading) {
     return (
       <div className="owner-reviews-page">
-        <div className="owner-reviews-loading">Loading reviews...</div>
+        <div className="owner-reviews-loading">
+          {loadingSelection
+            ? "Loading restaurant and branch..."
+            : "Loading reviews..."}
+        </div>
+      </div>
+    );
+  }
+
+  // No selected branch.
+  if (!branchId) {
+    return (
+      <div className="owner-reviews-page">
+        <div className="owner-reviews-empty">
+          <GitBranch size={32} />
+
+          <h3>No branch selected</h3>
+
+          <p>
+            Select a restaurant and branch from the dashboard header to view
+            customer reviews.
+          </p>
+        </div>
       </div>
     );
   }
@@ -181,35 +172,15 @@ export default function Reviews() {
       <div className="owner-reviews-header">
         <div>
           <h1>Customer Reviews</h1>
+
           <p>See what customers are saying about your dishes.</p>
         </div>
 
         <div className="owner-reviews-header-actions">
-          {/* Branch Selector */}
-          <div className="owner-branch-selector">
-            <GitBranch size={17} />
-
-            <select
-              value={branchId}
-              onChange={handleBranchChange}
-              disabled={branchesLoading || !branches.length}
-            >
-              {!branches.length ? (
-                <option value="">No branches</option>
-              ) : (
-                branches.map((branch) => (
-                  <option key={branch.id} value={branch.id}>
-                    {branch.name}
-                  </option>
-                ))
-              )}
-            </select>
-          </div>
-
           <button
             type="button"
             className="owner-reviews-refresh"
-            onClick={() => loadReviews(true)}
+            onClick={handleRefresh}
             disabled={refreshing || !branchId}
           >
             <RefreshCw
@@ -222,7 +193,7 @@ export default function Reviews() {
         </div>
       </div>
 
-      {/* Selected Branch */}
+      {/* Selected Branch Information */}
       {selectedBranch && (
         <div className="owner-selected-branch">
           <GitBranch size={16} />
@@ -233,7 +204,12 @@ export default function Reviews() {
         </div>
       )}
 
-      {error && <div className="owner-reviews-error">{error}</div>}
+      {/* Error */}
+      {error && (
+        <div className="owner-reviews-error" role="alert">
+          {error}
+        </div>
+      )}
 
       {/* Summary */}
       <div className="owner-reviews-summary">
@@ -251,6 +227,7 @@ export default function Reviews() {
 
           <div>
             <span>Average Rating</span>
+
             <strong>{reviews.length ? `${averageRating} / 5` : "—"}</strong>
           </div>
         </div>
@@ -278,6 +255,7 @@ export default function Reviews() {
               <div key={item.rating} className="owner-rating-row">
                 <div className="owner-rating-label">
                   <span>{item.rating}</span>
+
                   <Star size={13} fill="currentColor" />
                 </div>
 
@@ -297,11 +275,12 @@ export default function Reviews() {
         </div>
       </section>
 
-      {/* Reviews */}
+      {/* All Reviews */}
       <section className="owner-reviews-section">
         <div className="owner-reviews-section-header">
           <div>
             <h2>All Reviews</h2>
+
             <p>Customer feedback for your dishes.</p>
           </div>
 

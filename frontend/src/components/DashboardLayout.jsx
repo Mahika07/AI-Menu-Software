@@ -3,32 +3,34 @@ import { Menu, ShoppingBag } from "lucide-react";
 
 import Sidebar from "./Sidebar";
 import RestaurantBranchSelector from "./RestaurantBranchSelector";
-import { useBranchSelection } from "../context/BranchSelectionContext";
 
 const DRAWER_BREAKPOINT = 1024;
 
 function DashboardLayout({ children }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const { selectedBranchId } = useBranchSelection();
 
   function closeMenu() {
     setMenuOpen(false);
   }
 
-  // While the mobile drawer is open: Esc closes it, page scroll is locked,
-  // and it closes automatically if the window grows to desktop size.
+  // Mobile drawer behaviour.
   useEffect(() => {
     if (!menuOpen) return undefined;
 
     function handleKey(event) {
-      if (event.key === "Escape") setMenuOpen(false);
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+      }
     }
 
     function handleResize() {
-      if (window.innerWidth > DRAWER_BREAKPOINT) setMenuOpen(false);
+      if (window.innerWidth > DRAWER_BREAKPOINT) {
+        setMenuOpen(false);
+      }
     }
 
     const previousOverflow = document.body.style.overflow;
+
     document.body.style.overflow = "hidden";
     document.addEventListener("keydown", handleKey);
     window.addEventListener("resize", handleResize);
@@ -71,14 +73,11 @@ function DashboardLayout({ children }) {
       <Sidebar open={menuOpen} onNavigate={closeMenu} onClose={closeMenu} />
 
       <main className="dashboard-layout-content">
-        <div className="global-dashboard-toolbar">
-          <div className="global-dashboard-toolbar-copy">
-            <span className="global-dashboard-eyebrow">WORKSPACE</span>
-            <strong>Current location</strong>
-          </div>
+        <div className="global-workspace-header">
           <RestaurantBranchSelector />
         </div>
-        <div key={selectedBranchId || "no-selected-branch"}>{children}</div>
+
+        {children}
       </main>
     </div>
   );

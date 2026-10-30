@@ -8,9 +8,10 @@ import {
   RefreshCw,
   Utensils,
 } from "lucide-react";
-import { getRestaurants } from "../api/restaurants";
-import { getBranches } from "../api/branches";
+
 import { getBranchOrders, updateOrderItemStatus } from "../api/orders";
+
+import { useBranchSelection } from "../context/BranchSelectionContext";
 
 const ORDER_STATUSES = [
   "pending",
@@ -75,18 +76,23 @@ function NEXT_ITEM_STATUSES_SAFE(status) {
 }
 
 function KitchenDisplay() {
-  const [restaurants, setRestaurants] = useState([]);
-  const [branches, setBranches] = useState([]);
+  const {
+    selectedBranch,
+    selectedBranchId,
+    loading: branchLoading,
+  } = useBranchSelection();
+
+  const branchId = selectedBranchId || selectedBranch?.id || "";
+
   const [orders, setOrders] = useState([]);
-  const [restaurantId, setRestaurantId] = useState("");
-  const [branchId, setBranchId] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
   const [tableFilter, setTableFilter] = useState("");
-  const [loading, setLoading] = useState(true);
+
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [updatingItemId, setUpdatingItemId] = useState(null);
   const [error, setError] = useState("");
   const [lastUpdated, setLastUpdated] = useState(null);
+
   const [now, setNow] = useState(Date.now());
   const [isFullscreen, setIsFullscreen] = useState(
     Boolean(document.fullscreenElement),
@@ -106,73 +112,6 @@ function KitchenDisplay() {
       document.removeEventListener("fullscreenchange", onFullscreen);
     };
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadRestaurants() {
-      try {
-        const data = await getRestaurants();
-
-        if (!cancelled) {
-          const list = Array.isArray(data) ? data : [];
-          setRestaurants(list);
-
-          if (list.length) {
-            setRestaurantId(String(list[0].id));
-          }
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err.response?.data?.detail || "Unable to load restaurants.");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    loadRestaurants();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    setBranches([]);
-    setBranchId("");
-    setOrders([]);
-    setTableFilter("");
-
-    if (!restaurantId) return undefined;
-
-    async function loadBranches() {
-      try {
-        const data = await getBranches(restaurantId);
-
-        if (!cancelled) {
-          const list = Array.isArray(data) ? data : [];
-          setBranches(list);
-
-          if (list.length) {
-            setBranchId(String(list[0].id));
-          }
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err.response?.data?.detail || "Unable to load branches.");
-        }
-      }
-    }
-
-    loadBranches();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [restaurantId]);
 
   const loadOrders = useCallback(
     async (showLoader = false) => {
@@ -208,14 +147,21 @@ function KitchenDisplay() {
   );
 
   useEffect(() => {
-    if (!branchId) return undefined;
+    if (branchLoading) return undefined;
+
+    if (!branchId) {
+      setOrders([]);
+      setError("");
+      setLoadingOrders(false);
+      return undefined;
+    }
 
     loadOrders(true);
 
     const interval = window.setInterval(() => loadOrders(false), 5000);
 
     return () => window.clearInterval(interval);
-  }, [branchId, loadOrders]);
+  }, [branchId, branchLoading, loadOrders]);
 
   async function changeItemStatus(order, item, nextStatus) {
     if (!branchId || updatingItemId !== null) return;
@@ -343,14 +289,6 @@ function KitchenDisplay() {
     0,
   );
 
-  if (loading) {
-    return (
-      <div className="page kitchen-page">
-        <div className="loading">Loading restaurants...</div>
-      </div>
-    );
-  }
-
   return (
     <main className="page kitchen-page">
       <header className="kitchen-header">
@@ -362,6 +300,12 @@ function KitchenDisplay() {
           <div>
             <h1>Kitchen Display</h1>
             <p>Manage each dish separately and group orders by table.</p>
+
+            {selectedBranch && (
+              <p className="kitchen-selected-branch">
+                Branch: <strong>{selectedBranch.name}</strong>
+              </p>
+            )}
           </div>
         </div>
 
@@ -397,262 +341,252 @@ function KitchenDisplay() {
         </div>
       )}
 
-      <section className="kitchen-toolbar kitchen-toolbar-enhanced">
-        <label>
-          Restaurant
-          <select
-            value={restaurantId}
-            onChange={(e) => setRestaurantId(e.target.value)}
-          >
-            <option value="">Choose restaurant</option>
-            {restaurants.map((restaurant) => (
-              <option key={restaurant.id} value={restaurant.id}>
-                {restaurant.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          Branch
-          <select
-            value={branchId}
-            onChange={(e) => setBranchId(e.target.value)}
-            disabled={!branches.length}
-          >
-            <option value="">Choose branch</option>
-            {branches.map((branch) => (
-              <option key={branch.id} value={branch.id}>
-                {branch.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          Order status
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-          >
-            <option value="active">Active orders</option>
-            <option value="all">All statuses</option>
-            {ORDER_STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {ORDER_LABELS[status]}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          Table
-          <select
-            value={tableFilter}
-            onChange={(e) => setTableFilter(e.target.value)}
-          >
-            <option value="">All tables</option>
-            {tableOptions.map((table) => (
-              <option key={table} value={table}>
-                Table {table}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="kitchen-refresh-info">
-          <span className="kitchen-live-dot" />
-          Auto-refresh every 5 seconds
-          <small>
-            {lastUpdated
-              ? `Updated ${lastUpdated.toLocaleTimeString("en-IN")}`
-              : "Waiting for orders"}
-          </small>
-        </div>
-      </section>
-
-      <section className="kitchen-stats kitchen-stats-enhanced">
-        <div className="kitchen-stat">
-          <span>Active orders</span>
-          <strong>{activeCount}</strong>
-        </div>
-
-        <div className="kitchen-stat">
-          <span>Items preparing</span>
-          <strong>{preparingItems}</strong>
-        </div>
-
-        <div className="kitchen-stat">
-          <span>Items ready</span>
-          <strong>{readyItems}</strong>
-        </div>
-
-        <div
-          className={`kitchen-stat ${
-            overdueItems ? "kitchen-stat-overdue" : ""
-          }`}
-        >
-          <span>Overdue items</span>
-          <strong>{overdueItems}</strong>
-        </div>
-      </section>
-
-      {loadingOrders && orders.length === 0 ? (
-        <div className="kitchen-empty">Loading orders…</div>
-      ) : Object.keys(groupedOrders).length === 0 ? (
+      {branchLoading ? (
+        <div className="kitchen-empty">Loading branch information...</div>
+      ) : !branchId ? (
         <div className="kitchen-empty">
           <Utensils size={32} />
-          <h2>No matching orders</h2>
-          <p>Try another status or table filter.</p>
+          <h2>No branch selected</h2>
+          <p>Select a branch from the dashboard header.</p>
         </div>
       ) : (
-        <div className="kitchen-table-groups">
-          {Object.entries(groupedOrders).map(([tableNumber, tableOrders]) => (
-            <section className="kitchen-table-group" key={tableNumber}>
-              <header className="kitchen-table-group-header">
-                <div>
-                  <span className="kitchen-table-eyebrow">TABLE</span>
-                  <h2>{tableNumber}</h2>
-                </div>
+        <>
+          <section className="kitchen-toolbar kitchen-toolbar-enhanced">
+            <label>
+              Order status
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+              >
+                <option value="active">Active orders</option>
+                <option value="all">All statuses</option>
+                {ORDER_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {ORDER_LABELS[status]}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-                <span>
-                  {tableOrders.length}{" "}
-                  {tableOrders.length === 1 ? "order" : "orders"}
-                </span>
-              </header>
+            <label>
+              Table
+              <select
+                value={tableFilter}
+                onChange={(e) => setTableFilter(e.target.value)}
+              >
+                <option value="">All tables</option>
+                {tableOptions.map((table) => (
+                  <option key={table} value={table}>
+                    Table {table}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-              <div className="kitchen-orders kitchen-orders-enhanced">
-                {tableOrders.map((order) => (
-                  <article
-                    className={`kitchen-order kitchen-order-enhanced ${
-                      order.status === "cancelled" ? "is-cancelled" : ""
-                    }`}
-                    key={order.id || order.order_number}
-                  >
-                    <header className="kitchen-order-header">
+            <div className="kitchen-refresh-info">
+              <span className="kitchen-live-dot" />
+              Auto-refresh every 5 seconds
+              <small>
+                {lastUpdated
+                  ? `Updated ${lastUpdated.toLocaleTimeString("en-IN")}`
+                  : "Waiting for orders"}
+              </small>
+            </div>
+          </section>
+
+          <section className="kitchen-stats kitchen-stats-enhanced">
+            <div className="kitchen-stat">
+              <span>Active orders</span>
+              <strong>{activeCount}</strong>
+            </div>
+
+            <div className="kitchen-stat">
+              <span>Items preparing</span>
+              <strong>{preparingItems}</strong>
+            </div>
+
+            <div className="kitchen-stat">
+              <span>Items ready</span>
+              <strong>{readyItems}</strong>
+            </div>
+
+            <div
+              className={`kitchen-stat ${
+                overdueItems ? "kitchen-stat-overdue" : ""
+              }`}
+            >
+              <span>Overdue items</span>
+              <strong>{overdueItems}</strong>
+            </div>
+          </section>
+
+          {loadingOrders && orders.length === 0 ? (
+            <div className="kitchen-empty">Loading orders...</div>
+          ) : Object.keys(groupedOrders).length === 0 ? (
+            <div className="kitchen-empty">
+              <Utensils size={32} />
+              <h2>No matching orders</h2>
+              <p>Try another status or table filter.</p>
+            </div>
+          ) : (
+            <div className="kitchen-table-groups">
+              {Object.entries(groupedOrders).map(
+                ([tableNumber, tableOrders]) => (
+                  <section className="kitchen-table-group" key={tableNumber}>
+                    <header className="kitchen-table-group-header">
                       <div>
-                        <span className="kitchen-order-number">
-                          #{String(order.order_number || "").slice(0, 8)}
-                        </span>
-
-                        <p>
-                          {order.customer_name || "Guest"} ·{" "}
-                          {order.created_at
-                            ? new Date(order.created_at).toLocaleTimeString(
-                                "en-IN",
-                                {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                },
-                              )
-                            : "Time unavailable"}
-                        </p>
+                        <span className="kitchen-table-eyebrow">TABLE</span>
+                        <h2>{tableNumber}</h2>
                       </div>
 
-                      <span
-                        className={`kitchen-order-status status-${order.status}`}
-                      >
-                        {ORDER_LABELS[order.status] || order.status}
+                      <span>
+                        {tableOrders.length}{" "}
+                        {tableOrders.length === 1 ? "order" : "orders"}
                       </span>
                     </header>
 
-                    {order.customer_note && (
-                      <p className="kitchen-customer-note">
-                        Note: {order.customer_note}
-                      </p>
-                    )}
+                    <div className="kitchen-orders kitchen-orders-enhanced">
+                      {tableOrders.map((order) => (
+                        <article
+                          className={`kitchen-order kitchen-order-enhanced ${
+                            order.status === "cancelled" ? "is-cancelled" : ""
+                          }`}
+                          key={order.id || order.order_number}
+                        >
+                          <header className="kitchen-order-header">
+                            <div>
+                              <span className="kitchen-order-number">
+                                #{String(order.order_number || "").slice(0, 8)}
+                              </span>
 
-                    <div className="kitchen-item-list">
-                      {(order.items || []).map((item) => {
-                        const itemStatus = item.status || "pending";
-                        const elapsed = getElapsedMinutes(
-                          item.status_updated_at || order.created_at,
-                          now,
-                        );
+                              <p>
+                                {order.customer_name || "Guest"} ·{" "}
+                                {order.created_at
+                                  ? new Date(
+                                      order.created_at,
+                                    ).toLocaleTimeString("en-IN", {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })
+                                  : "Time unavailable"}
+                              </p>
+                            </div>
 
-                        const overdue =
-                          itemStatus === "preparing" &&
-                          elapsed >= OVERDUE_MINUTES;
+                            <span
+                              className={`kitchen-order-status status-${order.status}`}
+                            >
+                              {ORDER_LABELS[order.status] || order.status}
+                            </span>
+                          </header>
 
-                        const nextStatuses =
-                          NEXT_ITEM_STATUSES_SAFE(itemStatus);
+                          {order.customer_note && (
+                            <p className="kitchen-customer-note">
+                              Note: {order.customer_note}
+                            </p>
+                          )}
 
-                        const isUpdating = updatingItemId === item.id;
+                          <div className="kitchen-item-list">
+                            {(order.items || []).map((item) => {
+                              const itemStatus = item.status || "pending";
 
-                        return (
-                          <div
-                            className={`kitchen-item-row ${
-                              overdue ? "is-overdue" : ""
-                            }`}
-                            key={item.id}
-                          >
-                            <div className="kitchen-item-main">
-                              <div className="kitchen-item-title">
-                                <strong>
-                                  {item.quantity} × {item.dish_name}
-                                </strong>
+                              const elapsed = getElapsedMinutes(
+                                item.status_updated_at || order.created_at,
+                                now,
+                              );
 
-                                <span
-                                  className={`kitchen-item-status item-status-${itemStatus}`}
+                              const overdue =
+                                itemStatus === "preparing" &&
+                                elapsed >= OVERDUE_MINUTES;
+
+                              const nextStatuses =
+                                NEXT_ITEM_STATUSES_SAFE(itemStatus);
+
+                              const isUpdating = updatingItemId === item.id;
+
+                              return (
+                                <div
+                                  className={`kitchen-item-row ${
+                                    overdue ? "is-overdue" : ""
+                                  }`}
+                                  key={item.id}
                                 >
-                                  {ITEM_LABELS[itemStatus] || "Pending"}
-                                </span>
-                              </div>
+                                  <div className="kitchen-item-main">
+                                    <div className="kitchen-item-title">
+                                      <strong>
+                                        {item.quantity} × {item.dish_name}
+                                      </strong>
 
-                              {item.special_instructions && (
-                                <p className="kitchen-item-instructions">
-                                  {item.special_instructions}
-                                </p>
-                              )}
+                                      <span
+                                        className={`kitchen-item-status item-status-${itemStatus}`}
+                                      >
+                                        {ITEM_LABELS[itemStatus] || "Pending"}
+                                      </span>
+                                    </div>
 
-                              <small className="kitchen-item-timer">
-                                <Clock size={13} />{" "}
-                                {itemStatus === "preparing"
-                                  ? `Preparing ${formatElapsed(elapsed)}`
-                                  : `Updated ${formatElapsed(elapsed)} ago`}
-                                {overdue && <b> · OVERDUE</b>}
-                              </small>
-                            </div>
+                                    {item.special_instructions && (
+                                      <p className="kitchen-item-instructions">
+                                        {item.special_instructions}
+                                      </p>
+                                    )}
 
-                            <div className="kitchen-item-controls">
-                              <select
-                                aria-label={`Status for ${item.dish_name}`}
-                                value={itemStatus}
-                                disabled={!nextStatuses.length || isUpdating}
-                                onChange={(e) =>
-                                  changeItemStatus(order, item, e.target.value)
-                                }
-                              >
-                                <option value={itemStatus}>
-                                  {isUpdating
-                                    ? "Updating…"
-                                    : ITEM_LABELS[itemStatus] || "Pending"}
-                                </option>
+                                    <small className="kitchen-item-timer">
+                                      <Clock size={13} />{" "}
+                                      {itemStatus === "preparing"
+                                        ? `Preparing ${formatElapsed(elapsed)}`
+                                        : `Updated ${formatElapsed(elapsed)} ago`}
+                                      {overdue && <b> · OVERDUE</b>}
+                                    </small>
+                                  </div>
 
-                                {nextStatuses.map((status) => (
-                                  <option value={status} key={status}>
-                                    {status === "cancelled"
-                                      ? "Cancel dish…"
-                                      : ITEM_LABELS[status]}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
+                                  <div className="kitchen-item-controls">
+                                    <select
+                                      aria-label={`Status for ${item.dish_name}`}
+                                      value={itemStatus}
+                                      disabled={
+                                        !nextStatuses.length || isUpdating
+                                      }
+                                      onChange={(e) =>
+                                        changeItemStatus(
+                                          order,
+                                          item,
+                                          e.target.value,
+                                        )
+                                      }
+                                    >
+                                      <option value={itemStatus}>
+                                        {isUpdating
+                                          ? "Updating..."
+                                          : ITEM_LABELS[itemStatus] ||
+                                            "Pending"}
+                                      </option>
+
+                                      {nextStatuses.map((status) => (
+                                        <option value={status} key={status}>
+                                          {status === "cancelled"
+                                            ? "Cancel dish..."
+                                            : ITEM_LABELS[status]}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
-                        );
-                      })}
-                    </div>
 
-                    <footer className="kitchen-order-footer">
-                      <span>{(order.items || []).length} line items</span>
-                      <strong>{formatMoney(order.total_amount)}</strong>
-                    </footer>
-                  </article>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
+                          <footer className="kitchen-order-footer">
+                            <span>{(order.items || []).length} line items</span>
+                            <strong>{formatMoney(order.total_amount)}</strong>
+                          </footer>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                ),
+              )}
+            </div>
+          )}
+        </>
       )}
     </main>
   );

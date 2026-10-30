@@ -18,9 +18,9 @@ import {
   Armchair,
 } from "lucide-react";
 
-import { useBranchSelection } from "../context/BranchSelectionContext";
 import { getBranchOrders } from "../api/orders";
 import { getTables } from "../api/tables";
+import { useBranchSelection } from "../context/BranchSelectionContext";
 
 const navigationItems = [
   { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard, end: true },
@@ -76,22 +76,24 @@ function getAvailableTableCount(tables) {
 export default function Sidebar({ open = false, onNavigate, onClose }) {
   const navigate = useNavigate();
 
+  // Use the same branch selected in the global dashboard header.
+  const { selectedBranchId } = useBranchSelection();
+
   const [activeOrderCount, setActiveOrderCount] = useState(0);
   const [availableTableCount, setAvailableTableCount] = useState(0);
-  const { selectedBranchId: branchId } = useBranchSelection();
 
-  // Refresh active orders every five seconds.
+  // Refresh active orders for the globally selected branch.
   useEffect(() => {
-    if (!branchId) {
+    if (!selectedBranchId) {
       setActiveOrderCount(0);
       return undefined;
     }
 
     let cancelled = false;
 
-    async function refreshCount() {
+    async function refreshOrders() {
       try {
-        const result = await getBranchOrders(branchId);
+        const result = await getBranchOrders(selectedBranchId);
         const orders = Array.isArray(result) ? result : [];
 
         const count = orders.filter((order) =>
@@ -103,49 +105,75 @@ export default function Sidebar({ open = false, onNavigate, onClose }) {
         }
       } catch (error) {
         console.error("Unable to refresh kitchen order badge:", error);
+
+        if (!cancelled) {
+          setActiveOrderCount(0);
+        }
       }
     }
 
-    refreshCount();
-    const intervalId = window.setInterval(refreshCount, 5000);
+    refreshOrders();
+
+    const intervalId = window.setInterval(refreshOrders, 5000);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [branchId]);
+  }, [selectedBranchId]);
 
-  // Refresh available table count every five seconds.
+  // Refresh available tables for the globally selected branch.
   const refreshAvailableTables = useCallback(async () => {
-    if (!branchId) {
+    if (!selectedBranchId) {
       setAvailableTableCount(0);
       return;
     }
 
     try {
-      const result = await getTables(branchId);
+      const result = await getTables(selectedBranchId);
       const tables = Array.isArray(result) ? result : [];
 
       setAvailableTableCount(getAvailableTableCount(tables));
     } catch (error) {
       console.error("Unable to refresh table status badge:", error);
+      setAvailableTableCount(0);
     }
-  }, [branchId]);
+  }, [selectedBranchId]);
 
   useEffect(() => {
-    if (!branchId) {
+    let cancelled = false;
+
+    if (!selectedBranchId) {
       setAvailableTableCount(0);
       return undefined;
     }
 
-    refreshAvailableTables();
+    async function loadTables() {
+      try {
+        const result = await getTables(selectedBranchId);
+        const tables = Array.isArray(result) ? result : [];
+
+        if (!cancelled) {
+          setAvailableTableCount(getAvailableTableCount(tables));
+        }
+      } catch (error) {
+        console.error("Unable to refresh table status badge:", error);
+
+        if (!cancelled) {
+          setAvailableTableCount(0);
+        }
+      }
+    }
+
+    loadTables();
 
     const intervalId = window.setInterval(refreshAvailableTables, 5000);
 
     return () => {
+      cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [branchId, refreshAvailableTables]);
+  }, [selectedBranchId, refreshAvailableTables]);
 
   function handleLogout() {
     localStorage.removeItem("access_token");
@@ -191,6 +219,7 @@ export default function Sidebar({ open = false, onNavigate, onClose }) {
               }
             >
               <Icon size={18} />
+
               <span>{item.label}</span>
 
               {item.path === "/dashboard/kitchen" && activeOrderCount > 0 && (

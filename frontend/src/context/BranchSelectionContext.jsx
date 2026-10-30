@@ -6,158 +6,274 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useLocation, useParams } from "react-router-dom";
 import { getRestaurants } from "../api/restaurants";
 import { getBranches } from "../api/branches";
 
 const BranchSelectionContext = createContext(null);
+
 const RESTAURANT_KEY = "selected_restaurant_id";
 const BRANCH_KEY = "selected_branch_id";
 
-function notifySelectionChange() {
-  window.dispatchEvent(new CustomEvent("smart-menu:branch-change"));
-}
-
 export function BranchSelectionProvider({ children }) {
+  const location = useLocation();
+  const params = useParams();
+
   const [restaurants, setRestaurants] = useState([]);
   const [branches, setBranches] = useState([]);
+
   const [selectedRestaurantId, setSelectedRestaurantId] = useState(
     localStorage.getItem(RESTAURANT_KEY) || "",
   );
+
   const [selectedBranchId, setSelectedBranchId] = useState(
     localStorage.getItem(BRANCH_KEY) || "",
   );
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const persist = useCallback((restaurantId, branchId) => {
-    if (restaurantId)
-      localStorage.setItem(RESTAURANT_KEY, String(restaurantId));
-    else localStorage.removeItem(RESTAURANT_KEY);
-    if (branchId) localStorage.setItem(BRANCH_KEY, String(branchId));
-    else localStorage.removeItem(BRANCH_KEY);
-    setSelectedRestaurantId(restaurantId ? String(restaurantId) : "");
-    setSelectedBranchId(branchId ? String(branchId) : "");
-    notifySelectionChange();
-  }, []);
+  const selectBranch = useCallback(
+    (branch, restaurantId) => {
+      const id = typeof branch === "object" ? branch?.id : branch;
 
-  const loadRestaurantBranches = useCallback(
-    async (restaurantId, restaurantList = restaurants, initial = false) => {
-      if (!restaurantId) {
-        setBranches([]);
-        persist("", "");
+      const resolvedRestaurantId =
+        restaurantId ||
+        (typeof branch === "object" ? branch?.restaurant_id : null) ||
+        selectedRestaurantId;
+
+      if (!id) {
+        setSelectedBranchId("");
+        localStorage.removeItem(BRANCH_KEY);
+
+        window.dispatchEvent(
+          new CustomEvent("smart-menu:branch-change", {
+            detail: {
+              branchId: "",
+              restaurantId: resolvedRestaurantId || "",
+            },
+          }),
+        );
         return;
       }
-      try {
-        const rows = await getBranches(restaurantId);
-        const list = Array.isArray(rows)
-          ? rows.filter((b) => b.is_active !== false)
-          : [];
-        setBranches(list);
-        const savedBranch = localStorage.getItem(BRANCH_KEY);
-        const validSaved = list.find(
-          (b) => String(b.id) === String(savedBranch),
-        );
-        const branch = validSaved || list[0] || null;
-        const restaurant = (restaurantList || []).find(
-          (r) => String(r.id) === String(restaurantId),
-        );
-        persist(restaurantId, branch?.id || "");
-        if (!restaurant && initial)
-          setError("Selected restaurant is no longer available.");
-      } catch (err) {
-        console.error("Unable to load branches", err);
-        setBranches([]);
-        persist(restaurantId, "");
-        setError(err.response?.data?.detail || "Unable to load branches.");
-      }
-    },
-    [persist, restaurants],
-  );
 
-  const loadRestaurants = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const rows = await getRestaurants();
-      const list = Array.isArray(rows)
-        ? rows.filter((r) => r.is_active !== false)
-        : [];
-      setRestaurants(list);
-      if (!list.length) {
-        setBranches([]);
-        persist("", "");
-        return;
-      }
-      const savedId = localStorage.getItem(RESTAURANT_KEY);
-      const selected =
-        list.find((r) => String(r.id) === String(savedId)) || list[0];
-      await loadRestaurantBranches(selected.id, list, true);
-    } catch (err) {
-      console.error("Unable to load restaurant/branch selection", err);
-      setError(
-        err.response?.data?.detail ||
-          "Unable to load restaurants and branches.",
+      if (!resolvedRestaurantId) return;
+
+      const nextBranchId = String(id);
+      const nextRestaurantId = String(resolvedRestaurantId);
+
+      setSelectedBranchId(nextBranchId);
+      setSelectedRestaurantId(nextRestaurantId);
+
+      localStorage.setItem(BRANCH_KEY, nextBranchId);
+      localStorage.setItem(RESTAURANT_KEY, nextRestaurantId);
+
+      window.dispatchEvent(
+        new CustomEvent("smart-menu:branch-change", {
+          detail: {
+            branchId: nextBranchId,
+            restaurantId: nextRestaurantId,
+          },
+        }),
       );
-    } finally {
-      setLoading(false);
-    }
-  }, [persist]);
-
-  useEffect(() => {
-    loadRestaurants();
-  }, [loadRestaurants]);
+    },
+    [selectedRestaurantId],
+  );
 
   const selectRestaurant = useCallback(
     async (restaurantId) => {
-      setSelectedRestaurantId(String(restaurantId));
-      localStorage.setItem(RESTAURANT_KEY, String(restaurantId));
+      if (!restaurantId) return;
+
+      const id = String(restaurantId);
+
+      setSelectedRestaurantId(id);
       setSelectedBranchId("");
+
+      localStorage.setItem(RESTAURANT_KEY, id);
       localStorage.removeItem(BRANCH_KEY);
+
       setBranches([]);
-      notifySelectionChange();
-      await loadRestaurantBranches(restaurantId, restaurants, false);
+      setError("");
+
+      try {
+        const result = await getBranches(id);
+        const list = Array.isArray(result) ? result : [];
+
+        setBranches(list);
+
+        const activeBranches = list.filter(
+          (branch) => branch.is_active !== false,
+        );
+
+        if (activeBranches.length > 0) {
+          selectBranch(activeBranches[0], id);
+        }
+      } catch (err) {
+        setError(err?.response?.data?.detail || "Unable to load branches.");
+      }
     },
-    [loadRestaurantBranches, restaurants],
+    [selectBranch],
   );
 
-  const selectBranch = useCallback(
-    (branchId) => {
-      const branch = branches.find((b) => String(b.id) === String(branchId));
-      if (!branch) return;
-      const restaurantId = branch.restaurant_id || selectedRestaurantId;
-      persist(restaurantId, branch.id);
-    },
-    [branches, persist, selectedRestaurantId],
-  );
+  useEffect(() => {
+    let cancelled = false;
+
+    async function initialize() {
+      setLoading(true);
+      setError("");
+
+      try {
+        const result = await getRestaurants();
+        const list = Array.isArray(result) ? result : [];
+
+        if (cancelled) return;
+
+        setRestaurants(list);
+
+        if (!list.length) {
+          setBranches([]);
+          return;
+        }
+
+        const routeRestaurantId =
+          params.restaurantId ||
+          new URLSearchParams(location.search).get("restaurantId");
+
+        const savedRestaurantId = localStorage.getItem(RESTAURANT_KEY);
+
+        const restaurant =
+          list.find(
+            (r) =>
+              String(r.id) === String(routeRestaurantId || savedRestaurantId),
+          ) || list[0];
+
+        const restaurantId = String(restaurant.id);
+
+        const branchResult = await getBranches(restaurantId);
+
+        if (cancelled) return;
+
+        const branchList = Array.isArray(branchResult) ? branchResult : [];
+
+        setBranches(branchList);
+
+        const routeBranchId = params.branchId;
+        const savedBranchId = localStorage.getItem(BRANCH_KEY);
+
+        const activeBranches = branchList.filter(
+          (branch) => branch.is_active !== false,
+        );
+
+        const chosenBranch =
+          activeBranches.find(
+            (branch) =>
+              String(branch.id) === String(routeBranchId || savedBranchId),
+          ) ||
+          activeBranches[0] ||
+          branchList[0];
+
+        setSelectedRestaurantId(restaurantId);
+        localStorage.setItem(RESTAURANT_KEY, restaurantId);
+
+        if (chosenBranch) {
+          setSelectedBranchId(String(chosenBranch.id));
+          localStorage.setItem(BRANCH_KEY, String(chosenBranch.id));
+        } else {
+          setSelectedBranchId("");
+          localStorage.removeItem(BRANCH_KEY);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err?.response?.data?.detail ||
+              "Unable to load restaurant and branch selection.",
+          );
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    initialize();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!selectedRestaurantId) return;
+
+    let cancelled = false;
+
+    getBranches(selectedRestaurantId)
+      .then((result) => {
+        if (cancelled) return;
+
+        const list = Array.isArray(result) ? result : [];
+        setBranches(list);
+
+        if (
+          selectedBranchId &&
+          !list.some((branch) => String(branch.id) === String(selectedBranchId))
+        ) {
+          const fallback = list.find((branch) => branch.is_active !== false);
+
+          if (fallback) {
+            selectBranch(fallback, selectedRestaurantId);
+          } else {
+            setSelectedBranchId("");
+            localStorage.removeItem(BRANCH_KEY);
+          }
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(
+            err?.response?.data?.detail || "Unable to refresh branches.",
+          );
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRestaurantId]);
+
+  const selectedRestaurant =
+    restaurants.find(
+      (restaurant) => String(restaurant.id) === String(selectedRestaurantId),
+    ) || null;
+
+  const selectedBranch =
+    branches.find((branch) => String(branch.id) === String(selectedBranchId)) ||
+    null;
 
   const value = useMemo(
     () => ({
       restaurants,
       branches,
+      selectedRestaurant,
+      selectedBranch,
       selectedRestaurantId,
       selectedBranchId,
       loading,
       error,
-      selectedRestaurant:
-        restaurants.find(
-          (r) => String(r.id) === String(selectedRestaurantId),
-        ) || null,
-      selectedBranch:
-        branches.find((b) => String(b.id) === String(selectedBranchId)) || null,
-      selectRestaurant,
       selectBranch,
-      reloadSelection: loadRestaurants,
+      selectRestaurant,
+      setSelectedBranch: selectBranch,
     }),
     [
       restaurants,
       branches,
+      selectedRestaurant,
+      selectedBranch,
       selectedRestaurantId,
       selectedBranchId,
       loading,
       error,
-      selectRestaurant,
       selectBranch,
-      loadRestaurants,
+      selectRestaurant,
     ],
   );
 
@@ -169,16 +285,13 @@ export function BranchSelectionProvider({ children }) {
 }
 
 export function useBranchSelection() {
-  const value = useContext(BranchSelectionContext);
-  if (!value)
+  const context = useContext(BranchSelectionContext);
+
+  if (!context) {
     throw new Error(
       "useBranchSelection must be used inside BranchSelectionProvider",
     );
-  return value;
-}
+  }
 
-// Reactive bridge for existing pages that consume selected_branch_id.
-export function useSelectedBranchId() {
-  const { selectedBranchId } = useBranchSelection();
-  return selectedBranchId;
+  return context;
 }

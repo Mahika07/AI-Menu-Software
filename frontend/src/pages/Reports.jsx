@@ -10,9 +10,8 @@ import {
   AlertCircle,
 } from "lucide-react";
 
-import { getRestaurants } from "../api/restaurants";
-import { getBranches } from "../api/branches";
 import { getBranchBillAnalytics } from "../api/bills";
+import { useBranchSelection } from "../context/BranchSelectionContext";
 
 import "./Reports.css";
 
@@ -50,92 +49,24 @@ function StatCard({ icon: Icon, label, value, detail }) {
 }
 
 export default function Reports() {
-  const [restaurants, setRestaurants] = useState([]);
-  const [branches, setBranches] = useState([]);
-  const [restaurantId, setRestaurantId] = useState("");
-  const [branchId, setBranchId] = useState("");
+  const {
+    selectedBranch,
+    selectedBranchId,
+    loading: branchLoading,
+  } = useBranchSelection();
 
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
   const [report, setReport] = useState(null);
-  const [loadingRestaurants, setLoadingRestaurants] = useState(true);
-  const [loadingBranches, setLoadingBranches] = useState(false);
   const [loadingReport, setLoadingReport] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadRestaurants() {
-      try {
-        setLoadingRestaurants(true);
-        const data = await getRestaurants();
-
-        if (cancelled) return;
-
-        const list = Array.isArray(data) ? data : [];
-        setRestaurants(list);
-
-        if (list.length) {
-          setRestaurantId(String(list[0].id));
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err.response?.data?.detail || "Could not load restaurants.");
-        }
-      } finally {
-        if (!cancelled) setLoadingRestaurants(false);
-      }
-    }
-
-    loadRestaurants();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadBranches() {
-      setBranches([]);
-      setBranchId("");
-      setReport(null);
-
-      if (!restaurantId) {
-        setLoadingBranches(false);
-        return;
-      }
-
-      try {
-        setLoadingBranches(true);
-        const data = await getBranches(restaurantId);
-
-        if (cancelled) return;
-
-        const list = Array.isArray(data) ? data : [];
-        setBranches(list);
-
-        if (list.length) {
-          setBranchId(String(list[0].id));
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err.response?.data?.detail || "Could not load branches.");
-        }
-      } finally {
-        if (!cancelled) setLoadingBranches(false);
-      }
-    }
-
-    loadBranches();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [restaurantId]);
+  const branchId = selectedBranchId
+    ? String(selectedBranchId)
+    : selectedBranch?.id
+      ? String(selectedBranch.id)
+      : "";
 
   const loadReport = useCallback(async () => {
     if (!branchId) {
@@ -170,8 +101,54 @@ export default function Reports() {
   }, [branchId, startDate, endDate]);
 
   useEffect(() => {
-    loadReport();
-  }, [loadReport]);
+    let cancelled = false;
+
+    async function fetchReport() {
+      if (!branchId) {
+        setReport(null);
+        setError("");
+        return;
+      }
+
+      if (startDate && endDate && startDate > endDate) {
+        setReport(null);
+        setError("Start date cannot be after end date.");
+        return;
+      }
+
+      try {
+        setLoadingReport(true);
+        setError("");
+
+        const data = await getBranchBillAnalytics(branchId, {
+          startDate,
+          endDate,
+        });
+
+        if (!cancelled) {
+          setReport(data);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setReport(null);
+          setError(
+            err.response?.data?.detail ||
+              "Could not load POS reports. Please try again.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingReport(false);
+        }
+      }
+    }
+
+    fetchReport();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [branchId, startDate, endDate]);
 
   const dailyTotals = report?.daily_totals || [];
   const collections = report?.daily_collections || [];
@@ -192,6 +169,12 @@ export default function Reports() {
           <p>
             Review billing, collections, discounts, taxes, and order activity.
           </p>
+
+          {selectedBranch && (
+            <p className="reports-selected-branch">
+              Branch: <strong>{selectedBranch.name}</strong>
+            </p>
+          )}
         </div>
 
         <button
@@ -209,50 +192,6 @@ export default function Reports() {
       </header>
 
       <section className="reports-filters">
-        <label>
-          <span>Restaurant</span>
-          <select
-            value={restaurantId}
-            onChange={(event) => setRestaurantId(event.target.value)}
-            disabled={loadingRestaurants}
-          >
-            {!restaurants.length && (
-              <option value="">
-                {loadingRestaurants
-                  ? "Loading restaurants..."
-                  : "No restaurants found"}
-              </option>
-            )}
-
-            {restaurants.map((restaurant) => (
-              <option key={restaurant.id} value={String(restaurant.id)}>
-                {restaurant.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          <span>Branch</span>
-          <select
-            value={branchId}
-            onChange={(event) => setBranchId(event.target.value)}
-            disabled={loadingBranches || !branches.length}
-          >
-            {!branches.length && (
-              <option value="">
-                {loadingBranches ? "Loading branches..." : "No branches found"}
-              </option>
-            )}
-
-            {branches.map((branch) => (
-              <option key={branch.id} value={String(branch.id)}>
-                {branch.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
         <label>
           <span>From date</span>
           <input
@@ -292,12 +231,15 @@ export default function Reports() {
         </div>
       )}
 
-      {loadingReport && !report ? (
-        <div className="reports-loading">Loading your reports...</div>
+      {branchLoading ? (
+        <div className="reports-loading">Loading branch information...</div>
       ) : !branchId ? (
         <div className="reports-empty">
-          Select a restaurant branch to view its reports.
+          Select a restaurant branch from the dashboard header to view its
+          reports.
         </div>
+      ) : loadingReport && !report ? (
+        <div className="reports-loading">Loading your reports...</div>
       ) : report ? (
         <>
           <div className="reports-period">

@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { getBranchSalesAnalytics } from "../api/salesAnalytics";
+import { useBranchSelection } from "../context/BranchSelectionContext";
 
 const money = (value) =>
   new Intl.NumberFormat("en-IN", {
@@ -51,6 +52,7 @@ function RevenueChart({ data }) {
 
   const chartWidth = width - pad.left - pad.right;
   const chartHeight = height - pad.top - pad.bottom;
+
   const maximum = Math.max(
     1,
     ...data.map((point) => Number(point.revenue || 0)),
@@ -69,6 +71,7 @@ function RevenueChart({ data }) {
   }));
 
   const line = points.map((point) => `${point.x},${point.y}`).join(" ");
+
   const area = points.length
     ? `${pad.left},${pad.top + chartHeight} ${line} ${points[points.length - 1].x},${pad.top + chartHeight}`
     : "";
@@ -87,6 +90,7 @@ function RevenueChart({ data }) {
       >
         {[0, 1, 2, 3].map((tick) => {
           const y = pad.top + (chartHeight / 3) * tick;
+
           return (
             <line
               key={tick}
@@ -121,6 +125,7 @@ function RevenueChart({ data }) {
 
         {points.map((point, index) => {
           const step = Math.max(1, Math.ceil(points.length / 7));
+
           if (index % step !== 0 && index !== points.length - 1) {
             return null;
           }
@@ -160,6 +165,7 @@ function StatusBreakdown({ breakdown = {} }) {
               <span>{status.replaceAll("_", " ")}</span>
               <strong>{number(count)}</strong>
             </div>
+
             <div className="sales-status-track">
               <div
                 className={`sales-status-fill status-${status}`}
@@ -175,6 +181,12 @@ function StatusBreakdown({ breakdown = {} }) {
 }
 
 export default function SalesAnalytics() {
+  const {
+    selectedBranch,
+    selectedBranchId,
+    loading: branchLoading,
+  } = useBranchSelection();
+
   const [analytics, setAnalytics] = useState(null);
   const [days, setDays] = useState(7);
   const [startDate, setStartDate] = useState("");
@@ -183,30 +195,39 @@ export default function SalesAnalytics() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
 
-  const branchId = localStorage.getItem("selected_branch_id");
+  const branchId = selectedBranchId || selectedBranch?.id || "";
 
   const loadAnalytics = useCallback(
     async (refresh = false) => {
       if (!branchId) {
+        setAnalytics(null);
         setError("Select a branch before viewing sales analytics.");
         setLoading(false);
+        setRefreshing(false);
         return;
       }
 
       if (Boolean(startDate) !== Boolean(endDate)) {
         setError("Choose both a start date and an end date.");
         setLoading(false);
+        setRefreshing(false);
         return;
       }
 
       if (startDate && endDate && startDate > endDate) {
         setError("Start date must be on or before end date.");
         setLoading(false);
+        setRefreshing(false);
         return;
       }
 
       try {
-        refresh ? setRefreshing(true) : setLoading(true);
+        if (refresh) {
+          setRefreshing(true);
+        } else {
+          setLoading(true);
+        }
+
         setError("");
 
         const result = await getBranchSalesAnalytics(
@@ -219,6 +240,7 @@ export default function SalesAnalytics() {
         setAnalytics(result);
       } catch (err) {
         console.error("Sales analytics error:", err);
+
         setError(
           err.response?.data?.detail ||
             "Unable to load sales analytics. Check the backend endpoint.",
@@ -232,8 +254,69 @@ export default function SalesAnalytics() {
   );
 
   useEffect(() => {
-    loadAnalytics();
-  }, [loadAnalytics]);
+    let cancelled = false;
+
+    async function fetchAnalytics() {
+      if (branchLoading) return;
+
+      if (!branchId) {
+        setAnalytics(null);
+        setError("Select a branch before viewing sales analytics.");
+        setLoading(false);
+        return;
+      }
+
+      if (Boolean(startDate) !== Boolean(endDate)) {
+        setAnalytics(null);
+        setError("Choose both a start date and an end date.");
+        setLoading(false);
+        return;
+      }
+
+      if (startDate && endDate && startDate > endDate) {
+        setAnalytics(null);
+        setError("Start date must be on or before end date.");
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        setError("");
+
+        const result = await getBranchSalesAnalytics(
+          branchId,
+          days,
+          startDate,
+          endDate,
+        );
+
+        if (!cancelled) {
+          setAnalytics(result);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Sales analytics error:", err);
+
+          setAnalytics(null);
+          setError(
+            err.response?.data?.detail ||
+              "Unable to load sales analytics. Check the backend endpoint.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    fetchAnalytics();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [branchId, days, startDate, endDate, branchLoading]);
 
   const chartData = useMemo(() => analytics?.daily_revenue || [], [analytics]);
 
@@ -255,14 +338,21 @@ export default function SalesAnalytics() {
         <div>
           <span className="sales-eyebrow">BUSINESS OVERVIEW</span>
           <h1>Sales Analytics</h1>
+
           <p>Understand revenue, order trends and your best-selling dishes.</p>
+
+          {selectedBranch && (
+            <p className="sales-selected-branch">
+              Branch: <strong>{selectedBranch.name}</strong>
+            </p>
+          )}
         </div>
 
         <button
           type="button"
           className="sales-refresh-button"
           onClick={() => loadAnalytics(true)}
-          disabled={loading || refreshing}
+          disabled={loading || refreshing || !branchId}
         >
           <RefreshCw size={16} className={refreshing ? "sales-spinning" : ""} />
           Refresh
@@ -273,6 +363,7 @@ export default function SalesAnalytics() {
         <label>
           <CalendarDays size={17} />
           <span>Period</span>
+
           <select
             value={days}
             onChange={(event) => {
@@ -328,7 +419,9 @@ export default function SalesAnalytics() {
         </div>
       )}
 
-      {loading ? (
+      {branchLoading ? (
+        <div className="sales-loading">Loading branch information…</div>
+      ) : loading ? (
         <div className="sales-loading">
           <RefreshCw size={22} className="sales-spinning" />
           Loading sales analytics…
@@ -342,18 +435,21 @@ export default function SalesAnalytics() {
               value={money(analytics.total_revenue)}
               note="Excludes cancelled orders"
             />
+
             <MetricCard
               icon={ShoppingBag}
               label="All orders"
               value={number(analytics.total_orders)}
               note={`${number(analytics.cancelled_orders)} cancelled`}
             />
+
             <MetricCard
               icon={TrendingUp}
               label="Average order value"
               value={money(analytics.average_order_value)}
               note="Non-cancelled orders"
             />
+
             <MetricCard
               icon={CheckCircle2}
               label="Eligible orders"
@@ -370,6 +466,7 @@ export default function SalesAnalytics() {
                   {analytics.start_date} to {analytics.end_date}
                 </p>
               </div>
+
               <span className="sales-panel-badge">
                 <Activity size={15} /> Daily
               </span>
@@ -390,6 +487,7 @@ export default function SalesAnalytics() {
                   <h2>Popular dishes</h2>
                   <p>Ranked by quantity ordered</p>
                 </div>
+
                 <Utensils size={19} />
               </div>
 
@@ -406,6 +504,7 @@ export default function SalesAnalytics() {
                           <strong>{dish.dish_name}</strong>
                           <span>{number(dish.quantity_sold)} sold</span>
                         </div>
+
                         <div className="sales-status-track">
                           <div
                             className="sales-dish-bar"
@@ -437,6 +536,7 @@ export default function SalesAnalytics() {
                   <h2>Order status</h2>
                   <p>All orders in the selected period</p>
                 </div>
+
                 <ShoppingBag size={19} />
               </div>
 
@@ -455,7 +555,11 @@ export default function SalesAnalytics() {
           </p>
         </>
       ) : (
-        <div className="sales-empty">No analytics data available.</div>
+        <div className="sales-empty">
+          {!branchId
+            ? "Select a branch from the dashboard header to view analytics."
+            : "No analytics data available."}
+        </div>
       )}
     </main>
   );

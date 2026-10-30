@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
+
 import {
   Plus,
   Pencil,
@@ -14,9 +15,9 @@ import {
   CircleAlert,
   Ban,
   Armchair,
-  Users,
   LayoutGrid,
 } from "lucide-react";
+
 import { QRCodeCanvas } from "qrcode.react";
 
 import {
@@ -25,6 +26,8 @@ import {
   updateTable,
   deleteTable,
 } from "../api/tables";
+
+import { useBranchSelection } from "../context/BranchSelectionContext";
 
 const FILTERS = [
   { value: "all", label: "All tables" },
@@ -78,8 +81,32 @@ const cardStyle = {
 };
 
 function Tables() {
-  const { restaurantId, branchId } = useParams();
+  const { restaurantId: routeRestaurantId, branchId: routeBranchId } =
+    useParams();
+
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const {
+    restaurants = [],
+    branches = [],
+    selectedRestaurantId,
+    selectedBranchId,
+    loading: branchLoading,
+  } = useBranchSelection();
+
+  const selectedBranch = branches.find(
+    (branch) => String(branch.id) === String(selectedBranchId),
+  );
+
+  const selectedRestaurant = restaurants.find(
+    (restaurant) => String(restaurant.id) === String(selectedRestaurantId),
+  );
+
+  const restaurantId = selectedRestaurantId || routeRestaurantId;
+  const branchId = selectedBranchId || "";
+
+  const requestIdRef = useRef(0);
 
   const [tables, setTables] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -98,35 +125,74 @@ function Tables() {
     is_active: true,
   });
 
+  // Keep the branch-specific route synchronized with the global selection.
+  useEffect(() => {
+    if (branchLoading || !branchId || !restaurantId) return;
+
+    const expectedPath = `/dashboard/restaurants/${restaurantId}/branches/${branchId}/tables`;
+
+    if (location.pathname !== expectedPath) {
+      navigate(expectedPath, { replace: true });
+    }
+  }, [branchLoading, branchId, restaurantId, location.pathname, navigate]);
+
   const loadTables = useCallback(
     async (showLoader = true) => {
+      const requestId = ++requestIdRef.current;
+
       if (!branchId) {
         setTables([]);
         setLoading(false);
+        setRefreshing(false);
         return;
       }
 
       try {
-        if (showLoader) setLoading(true);
-        else setRefreshing(true);
+        if (showLoader) {
+          setLoading(true);
+        } else {
+          setRefreshing(true);
+        }
 
         setError("");
 
         const data = await getTables(branchId);
+
+        if (requestId !== requestIdRef.current) return;
+
         setTables(Array.isArray(data) ? data : []);
       } catch (err) {
+        if (requestId !== requestIdRef.current) return;
+
         setError(err.response?.data?.detail || "Failed to load tables.");
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (requestId === requestIdRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [branchId],
   );
 
   useEffect(() => {
+    if (branchLoading) return;
+
+    if (!branchId) {
+      setTables([]);
+      setLoading(false);
+      setError("");
+      return;
+    }
+
+    setLoading(true);
+    setTables([]);
     loadTables();
-  }, [loadTables]);
+
+    return () => {
+      requestIdRef.current += 1;
+    };
+  }, [loadTables, branchLoading, branchId]);
 
   const stats = useMemo(() => {
     const result = {
@@ -161,10 +227,12 @@ function Tables() {
 
   function openCreateForm() {
     setEditingTable(null);
+
     setForm({
       table_number: "",
       is_active: true,
     });
+
     setError("");
     setNotice("");
     setShowForm(true);
@@ -172,10 +240,12 @@ function Tables() {
 
   function openEditForm(table) {
     setEditingTable(table);
+
     setForm({
       table_number: table.table_number,
       is_active: table.is_active,
     });
+
     setError("");
     setNotice("");
     setShowForm(true);
@@ -183,6 +253,11 @@ function Tables() {
 
   async function handleSubmit(event) {
     event.preventDefault();
+
+    if (!branchId) {
+      setError("Select a branch before managing tables.");
+      return;
+    }
 
     try {
       setError("");
@@ -200,11 +275,13 @@ function Tables() {
           table_number: tableNumber,
           is_active: form.is_active,
         });
+
         setNotice("Table updated successfully.");
       } else {
         await createTable(branchId, {
           table_number: tableNumber,
         });
+
         setNotice("Table created successfully.");
       }
 
@@ -308,6 +385,7 @@ function Tables() {
     }
 
     const downloadLink = document.createElement("a");
+
     downloadLink.href = canvas.toDataURL("image/png");
     downloadLink.download = `table-${table.table_number}-qr.png`;
 
@@ -416,6 +494,8 @@ function Tables() {
     },
   ];
 
+  const baseRoute = `/dashboard/restaurants/${restaurantId}/branches/${branchId}`;
+
   return (
     <div className="page">
       {/* PAGE HEADER */}
@@ -424,21 +504,24 @@ function Tables() {
           <button
             type="button"
             className="back-button"
-            onClick={() =>
-              navigate(
-                `/dashboard/restaurants/${restaurantId}/branches/${branchId}/menu`,
-              )
-            }
+            onClick={() => navigate(`${baseRoute}/menu`)}
           >
             <ArrowLeft size={17} />
             Menu
           </button>
 
           <h1>Table Management</h1>
+
           <p>
             Monitor table occupancy, manage availability, and maintain customer
             QR codes.
           </p>
+
+          {selectedBranch && (
+            <p className="selected-branch-info">
+              Current branch: <strong>{selectedBranch.name}</strong>
+            </p>
+          )}
         </div>
 
         <div
@@ -453,7 +536,7 @@ function Tables() {
             type="button"
             className="secondary-button"
             onClick={() => loadTables(false)}
-            disabled={loading || refreshing}
+            disabled={loading || refreshing || !branchId}
           >
             <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
             {refreshing ? "Refreshing..." : "Refresh"}
@@ -462,11 +545,8 @@ function Tables() {
           <button
             type="button"
             className="secondary-button"
-            onClick={() =>
-              navigate(
-                `/dashboard/restaurants/${restaurantId}/branches/${branchId}/dining-sessions`,
-              )
-            }
+            onClick={() => navigate(`${baseRoute}/dining-sessions`)}
+            disabled={!branchId}
           >
             Manage Dining Sessions
           </button>
@@ -475,6 +555,7 @@ function Tables() {
             type="button"
             className="primary-button"
             onClick={openCreateForm}
+            disabled={!branchId}
           >
             <Plus size={18} />
             Add Table
@@ -516,518 +597,549 @@ function Tables() {
         </div>
       )}
 
-      {/* SUMMARY CARDS */}
-      <section
-        className="table-stats-grid"
-        aria-label="Table status summary"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(175px, 1fr))",
-          gap: 16,
-          marginBottom: 24,
-        }}
-      >
-        {summaryCards.map((item) => {
-          const Icon = item.icon;
-          const selected = statusFilter === item.key;
-
-          return (
-            <button
-              type="button"
-              key={item.key}
-              onClick={() => setStatusFilter(item.key)}
-              aria-pressed={selected}
-              style={{
-                ...cardStyle,
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-                textAlign: "left",
-                cursor: "pointer",
-                border: selected
-                  ? `2px solid ${item.color}`
-                  : "1px solid var(--border-color, #e5e7eb)",
-              }}
-            >
-              <span
-                style={{
-                  width: 46,
-                  height: 46,
-                  borderRadius: 12,
-                  display: "grid",
-                  placeItems: "center",
-                  background: item.background,
-                  color: item.color,
-                  flexShrink: 0,
-                }}
-              >
-                <Icon size={23} />
-              </span>
-
-              <span style={{ display: "grid", gap: 4 }}>
-                <span
-                  style={{
-                    fontSize: 13,
-                    color: "var(--muted-text, #64748b)",
-                  }}
-                >
-                  {item.label}
-                </span>
-                <strong style={{ fontSize: 26, lineHeight: 1.1 }}>
-                  {loading ? "—" : item.value}
-                </strong>
-              </span>
-            </button>
-          );
-        })}
-      </section>
-
-      {/* STATUS FILTERS */}
-      <section style={{ ...cardStyle, marginBottom: 24 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: 12,
-          }}
-        >
-          <div>
-            <h2 style={{ margin: 0 }}>Restaurant tables</h2>
-            <p
-              style={{
-                margin: "6px 0 0",
-                color: "var(--muted-text, #64748b)",
-              }}
-            >
-              {filteredTables.length} of {tables.length} tables
-            </p>
-          </div>
-
-          <label
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              flexWrap: "wrap",
-            }}
-          >
-            <span>Filter:</span>
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-              style={{
-                padding: "9px 12px",
-                borderRadius: 8,
-                border: "1px solid var(--border-color, #d1d5db)",
-                background: "var(--card-bg, #fff)",
-              }}
-            >
-              {FILTERS.map((filter) => (
-                <option key={filter.value} value={filter.value}>
-                  {filter.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </section>
-
-      {/* ADD / EDIT FORM */}
-      {showForm && (
-        <section className="form-card" style={{ marginBottom: 24 }}>
-          <h2>{editingTable ? "Edit Table" : "Add Table"}</h2>
-
-          <form onSubmit={handleSubmit}>
-            <label htmlFor="table_number">Table Number</label>
-            <input
-              id="table_number"
-              name="table_number"
-              value={form.table_number}
-              onChange={handleChange}
-              placeholder="e.g. Table 1"
-              required
-              minLength={1}
-              maxLength={50}
-            />
-
-            {editingTable && (
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  name="is_active"
-                  checked={form.is_active}
-                  onChange={handleChange}
-                />
-                Table is active
-              </label>
-            )}
-
-            <div className="form-actions">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => {
-                  setShowForm(false);
-                  setEditingTable(null);
-                }}
-              >
-                Cancel
-              </button>
-
-              <button type="submit" className="primary-button">
-                {editingTable ? "Save Changes" : "Create Table"}
-              </button>
-            </div>
-          </form>
-        </section>
-      )}
-
-      {/* TABLE GRID */}
-      {loading ? (
-        <div className="loading">Loading tables...</div>
-      ) : tables.length === 0 ? (
-        <div className="empty-state">
-          <QrCode size={40} />
-          <h2>No tables yet</h2>
-          <p>
-            Add your restaurant tables to manage seating and generate unique
-            customer menu QR codes.
-          </p>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={openCreateForm}
-          >
-            <Plus size={18} />
-            Add Table
-          </button>
-        </div>
-      ) : filteredTables.length === 0 ? (
+      {branchLoading ? (
+        <div className="loading">Loading branch information...</div>
+      ) : !branchId ? (
         <div className="empty-state">
           <Armchair size={40} />
-          <h2>No tables in this category</h2>
-          <p>Choose another status filter to see your tables.</p>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => setStatusFilter("all")}
-          >
-            Show all tables
-          </button>
+          <h2>No branch selected</h2>
+          <p>Select a branch from the dashboard header to manage tables.</p>
         </div>
       ) : (
-        <div
-          className="table-grid"
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(285px, 1fr))",
-            gap: 18,
-          }}
-        >
-          {filteredTables.map((table) => {
-            const tableStatus = getTableStatus(table);
-            const busy =
-              updatingTableId === table.id || deletingTableId === table.id;
+        <>
+          {/* SUMMARY CARDS */}
+          <section
+            className="table-stats-grid"
+            aria-label="Table status summary"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(175px, 1fr))",
+              gap: 16,
+              marginBottom: 24,
+            }}
+          >
+            {summaryCards.map((item) => {
+              const Icon = item.icon;
+              const selected = statusFilter === item.key;
 
-            return (
-              <article
-                className="table-card"
-                key={table.id}
-                style={{
-                  border: "1px solid var(--border-color, #e5e7eb)",
-                  borderRadius: 14,
-                  padding: 18,
-                  background: "var(--card-bg, #ffffff)",
-                  minWidth: 0,
-                }}
-              >
-                {/* CARD HEADER */}
-                <div
-                  className="table-card-header"
+              return (
+                <button
+                  type="button"
+                  key={item.key}
+                  onClick={() => setStatusFilter(item.key)}
+                  aria-pressed={selected}
                   style={{
+                    ...cardStyle,
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 12,
+                    gap: 14,
+                    textAlign: "left",
+                    cursor: "pointer",
+                    border: selected
+                      ? `2px solid ${item.color}`
+                      : "1px solid var(--border-color, #e5e7eb)",
                   }}
                 >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 12,
-                      minWidth: 0,
-                    }}
-                  >
-                    <div
-                      className="table-icon"
-                      style={{
-                        width: 46,
-                        height: 46,
-                        borderRadius: 12,
-                        display: "grid",
-                        placeItems: "center",
-                        background: "#eff6ff",
-                        color: "#2563eb",
-                        flexShrink: 0,
-                      }}
-                    >
-                      <Armchair size={25} />
-                    </div>
-
-                    <div style={{ minWidth: 0 }}>
-                      <h2
-                        style={{
-                          margin: 0,
-                          fontSize: 19,
-                          overflowWrap: "anywhere",
-                        }}
-                      >
-                        {table.table_number}
-                      </h2>
-                      <span
-                        style={{
-                          display: "inline-block",
-                          marginTop: 7,
-                          padding: "4px 9px",
-                          borderRadius: 20,
-                          background: tableStatus.background,
-                          color: tableStatus.color,
-                          fontSize: 12,
-                          fontWeight: 600,
-                        }}
-                      >
-                        {tableStatus.label}
-                      </span>
-                    </div>
-                  </div>
-
                   <span
-                    title="QR code"
                     style={{
-                      color: "var(--muted-text, #64748b)",
+                      width: 46,
+                      height: 46,
+                      borderRadius: 12,
+                      display: "grid",
+                      placeItems: "center",
+                      background: item.background,
+                      color: item.color,
                       flexShrink: 0,
                     }}
                   >
-                    <QrCode size={23} />
+                    <Icon size={23} />
                   </span>
-                </div>
 
-                {/* STATUS DETAILS */}
-                <div
+                  <span style={{ display: "grid", gap: 4 }}>
+                    <span
+                      style={{
+                        fontSize: 13,
+                        color: "var(--muted-text, #64748b)",
+                      }}
+                    >
+                      {item.label}
+                    </span>
+
+                    <strong style={{ fontSize: 26, lineHeight: 1.1 }}>
+                      {loading ? "—" : item.value}
+                    </strong>
+                  </span>
+                </button>
+              );
+            })}
+          </section>
+
+          {/* STATUS FILTERS */}
+          <section style={{ ...cardStyle, marginBottom: 24 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: 12,
+              }}
+            >
+              <div>
+                <h2 style={{ margin: 0 }}>Restaurant tables</h2>
+
+                <p
                   style={{
-                    marginTop: 16,
-                    padding: 12,
-                    borderRadius: 9,
-                    background: "var(--subtle-bg, #f8fafc)",
-                    fontSize: 13,
+                    margin: "6px 0 0",
                     color: "var(--muted-text, #64748b)",
                   }}
                 >
-                  {tableStatus.key === "available" &&
-                    "Ready to seat your next customer."}
-                  {tableStatus.key === "occupied" &&
-                    "An order or unpaid bill is associated with this table."}
-                  {tableStatus.key === "unavailable" &&
-                    "Blocked from new POS orders until restored."}
-                  {tableStatus.key === "inactive" && "Disabled in the system."}
-                </div>
+                  {filteredTables.length} of {tables.length} tables
+                </p>
+              </div>
 
-                {/* QR CODE */}
-                <div
-                  className="qr-display"
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  flexWrap: "wrap",
+                }}
+              >
+                <span>Filter:</span>
+
+                <select
+                  value={statusFilter}
+                  onChange={(event) => setStatusFilter(event.target.value)}
                   style={{
-                    display: "flex",
-                    justifyContent: "center",
-                    alignItems: "center",
-                    padding: "18px 0",
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border-color, #d1d5db)",
+                    background: "var(--card-bg, #fff)",
                   }}
                 >
-                  <QRCodeCanvas
-                    id={`qr-${table.id}`}
-                    value={getMenuUrl(table.qr_token)}
-                    size={160}
-                    level="H"
-                    includeMargin
-                  />
-                </div>
+                  {FILTERS.map((filter) => (
+                    <option key={filter.value} value={filter.value}>
+                      {filter.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </section>
 
-                {/* CUSTOMER MENU URL */}
-                <div className="qr-info">
-                  <label>Customer Menu</label>
-                  <div
-                    className="qr-url"
-                    title={getMenuUrl(table.qr_token)}
-                    style={{
-                      overflowWrap: "anywhere",
-                      fontSize: 12,
-                      marginTop: 6,
+          {/* ADD / EDIT FORM */}
+          {showForm && (
+            <section className="form-card" style={{ marginBottom: 24 }}>
+              <h2>{editingTable ? "Edit Table" : "Add Table"}</h2>
+
+              <form onSubmit={handleSubmit}>
+                <label htmlFor="table_number">Table Number</label>
+
+                <input
+                  id="table_number"
+                  name="table_number"
+                  value={form.table_number}
+                  onChange={handleChange}
+                  placeholder="e.g. Table 1"
+                  required
+                  minLength={1}
+                  maxLength={50}
+                />
+
+                {editingTable && (
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      name="is_active"
+                      checked={form.is_active}
+                      onChange={handleChange}
+                    />
+                    Table is active
+                  </label>
+                )}
+
+                <div className="form-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      setShowForm(false);
+                      setEditingTable(null);
                     }}
                   >
-                    {getMenuUrl(table.qr_token)}
-                  </div>
-                </div>
-
-                {/* QR ACTIONS */}
-                <div
-                  className="table-actions"
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                    gap: 8,
-                    marginTop: 16,
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => openMenu(table.qr_token)}
-                  >
-                    <ExternalLink size={15} />
-                    Open Menu
+                    Cancel
                   </button>
 
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => downloadQR(table)}
-                  >
-                    <Download size={15} />
-                    Download
-                  </button>
-
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => printQR(table)}
-                    style={{ gridColumn: "1 / -1" }}
-                  >
-                    <Printer size={15} />
-                    Print QR
+                  <button type="submit" className="primary-button">
+                    {editingTable ? "Save Changes" : "Create Table"}
                   </button>
                 </div>
+              </form>
+            </section>
+          )}
 
-                {/* AVAILABILITY ACTION */}
-                {/* TABLE STATUS DROPDOWN */}
-                {table.is_active !== false && (
-                  <div
+          {/* TABLE GRID */}
+          {loading ? (
+            <div className="loading">Loading tables...</div>
+          ) : tables.length === 0 ? (
+            <div className="empty-state">
+              <QrCode size={40} />
+              <h2>No tables yet</h2>
+
+              <p>
+                Add your restaurant tables to manage seating and generate unique
+                customer menu QR codes.
+              </p>
+
+              <button
+                type="button"
+                className="primary-button"
+                onClick={openCreateForm}
+              >
+                <Plus size={18} />
+                Add Table
+              </button>
+            </div>
+          ) : filteredTables.length === 0 ? (
+            <div className="empty-state">
+              <Armchair size={40} />
+              <h2>No tables in this category</h2>
+              <p>Choose another status filter to see your tables.</p>
+
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setStatusFilter("all")}
+              >
+                Show all tables
+              </button>
+            </div>
+          ) : (
+            <div
+              className="table-grid"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(285px, 1fr))",
+                gap: 18,
+              }}
+            >
+              {filteredTables.map((table) => {
+                const tableStatus = getTableStatus(table);
+
+                const busy =
+                  updatingTableId === table.id || deletingTableId === table.id;
+
+                return (
+                  <article
+                    className="table-card"
+                    key={table.id}
                     style={{
-                      marginTop: 14,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 7,
+                      border: "1px solid var(--border-color, #e5e7eb)",
+                      borderRadius: 14,
+                      padding: 18,
+                      background: "var(--card-bg, #ffffff)",
+                      minWidth: 0,
                     }}
                   >
-                    <label
-                      htmlFor={`table-status-${table.id}`}
+                    {/* CARD HEADER */}
+                    <div
+                      className="table-card-header"
                       style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 12,
+                          minWidth: 0,
+                        }}
+                      >
+                        <div
+                          className="table-icon"
+                          style={{
+                            width: 46,
+                            height: 46,
+                            borderRadius: 12,
+                            display: "grid",
+                            placeItems: "center",
+                            background: "#eff6ff",
+                            color: "#2563eb",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <Armchair size={25} />
+                        </div>
+
+                        <div style={{ minWidth: 0 }}>
+                          <h2
+                            style={{
+                              margin: 0,
+                              fontSize: 19,
+                              overflowWrap: "anywhere",
+                            }}
+                          >
+                            {table.table_number}
+                          </h2>
+
+                          <span
+                            style={{
+                              display: "inline-block",
+                              marginTop: 7,
+                              padding: "4px 9px",
+                              borderRadius: 20,
+                              background: tableStatus.background,
+                              color: tableStatus.color,
+                              fontSize: 12,
+                              fontWeight: 600,
+                            }}
+                          >
+                            {tableStatus.label}
+                          </span>
+                        </div>
+                      </div>
+
+                      <span
+                        title="QR code"
+                        style={{
+                          color: "var(--muted-text, #64748b)",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <QrCode size={23} />
+                      </span>
+                    </div>
+
+                    {/* STATUS DETAILS */}
+                    <div
+                      style={{
+                        marginTop: 16,
+                        padding: 12,
+                        borderRadius: 9,
+                        background: "var(--subtle-bg, #f8fafc)",
                         fontSize: 13,
-                        fontWeight: 600,
-                        color: "var(--text-color, #334155)",
+                        color: "var(--muted-text, #64748b)",
                       }}
                     >
-                      Table Status
-                    </label>
+                      {tableStatus.key === "available" &&
+                        "Ready to seat your next customer."}
 
-                    <select
-                      id={`table-status-${table.id}`}
-                      value={tableStatus.key}
-                      disabled={busy}
-                      onChange={(event) =>
-                        changeTableStatus(table, event.target.value)
-                      }
+                      {tableStatus.key === "occupied" &&
+                        "An order or unpaid bill is associated with this table."}
+
+                      {tableStatus.key === "unavailable" &&
+                        "Blocked from new POS orders until restored."}
+
+                      {tableStatus.key === "inactive" &&
+                        "Disabled in the system."}
+                    </div>
+
+                    {/* QR CODE */}
+                    <div
+                      className="qr-display"
                       style={{
-                        width: "100%",
-                        padding: "12px 14px",
-                        borderRadius: 10,
-                        border: "1px solid var(--border-color, #d1d5db)",
-                        background:
-                          tableStatus.key === "available"
-                            ? "#dcfce7"
-                            : tableStatus.key === "occupied"
-                              ? "#fee2e2"
-                              : "#fef3c7",
-                        color:
-                          tableStatus.key === "available"
-                            ? "#15803d"
-                            : tableStatus.key === "occupied"
-                              ? "#b91c1c"
-                              : "#a16207",
-                        fontSize: 14,
-                        fontWeight: 600,
-                        cursor: busy ? "not-allowed" : "pointer",
-                        outline: "none",
+                        display: "flex",
+                        justifyContent: "center",
+                        alignItems: "center",
+                        padding: "18px 0",
                       }}
                     >
-                      <option value="available">Available</option>
-                      <option value="occupied">Occupied</option>
-                      <option value="unavailable">Unavailable</option>
-                    </select>
+                      <QRCodeCanvas
+                        id={`qr-${table.id}`}
+                        value={getMenuUrl(table.qr_token)}
+                        size={160}
+                        level="H"
+                        includeMargin
+                      />
+                    </div>
+
+                    {/* CUSTOMER MENU URL */}
+                    <div className="qr-info">
+                      <label>Customer Menu</label>
+
+                      <div
+                        className="qr-url"
+                        title={getMenuUrl(table.qr_token)}
+                        style={{
+                          overflowWrap: "anywhere",
+                          fontSize: 12,
+                          marginTop: 6,
+                        }}
+                      >
+                        {getMenuUrl(table.qr_token)}
+                      </div>
+                    </div>
+
+                    {/* QR ACTIONS */}
+                    <div
+                      className="table-actions"
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                        gap: 8,
+                        marginTop: 16,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => openMenu(table.qr_token)}
+                      >
+                        <ExternalLink size={15} />
+                        Open Menu
+                      </button>
+
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => downloadQR(table)}
+                      >
+                        <Download size={15} />
+                        Download
+                      </button>
+
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => printQR(table)}
+                        style={{ gridColumn: "1 / -1" }}
+                      >
+                        <Printer size={15} />
+                        Print QR
+                      </button>
+                    </div>
+
+                    {/* TABLE STATUS */}
+                    {table.is_active !== false && (
+                      <div
+                        style={{
+                          marginTop: 14,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 7,
+                        }}
+                      >
+                        <label
+                          htmlFor={`table-status-${table.id}`}
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: "var(--text-color, #334155)",
+                          }}
+                        >
+                          Table Status
+                        </label>
+
+                        <select
+                          id={`table-status-${table.id}`}
+                          value={tableStatus.key}
+                          disabled={busy}
+                          onChange={(event) =>
+                            changeTableStatus(table, event.target.value)
+                          }
+                          style={{
+                            width: "100%",
+                            padding: "12px 14px",
+                            borderRadius: 10,
+                            border: "1px solid var(--border-color, #d1d5db)",
+                            background:
+                              tableStatus.key === "available"
+                                ? "#dcfce7"
+                                : tableStatus.key === "occupied"
+                                  ? "#fee2e2"
+                                  : "#fef3c7",
+                            color:
+                              tableStatus.key === "available"
+                                ? "#15803d"
+                                : tableStatus.key === "occupied"
+                                  ? "#b91c1c"
+                                  : "#a16207",
+                            fontSize: 14,
+                            fontWeight: 600,
+                            cursor: busy ? "not-allowed" : "pointer",
+                            outline: "none",
+                          }}
+                        >
+                          <option value="available">Available</option>
+                          <option value="occupied">Occupied</option>
+                          <option value="unavailable">Unavailable</option>
+                        </select>
+
+                        {busy && (
+                          <small
+                            style={{
+                              color: "var(--muted-text, #64748b)",
+                            }}
+                          >
+                            Updating status...
+                          </small>
+                        )}
+                      </div>
+                    )}
 
                     {busy && (
-                      <small style={{ color: "var(--muted-text, #64748b)" }}>
-                        Updating status...
-                      </small>
+                      <p
+                        style={{
+                          fontSize: 12,
+                          color: "var(--muted-text, #64748b)",
+                          marginTop: 8,
+                        }}
+                      >
+                        Updating table status...
+                      </p>
                     )}
-                  </div>
-                )}
 
-                {busy && (
-                  <p
-                    style={{
-                      fontSize: 12,
-                      color: "var(--muted-text, #64748b)",
-                      marginTop: 8,
-                    }}
-                  >
-                    Updating table status...
-                  </p>
-                )}
+                    {/* EDIT / DELETE */}
+                    <div
+                      className="card-actions"
+                      style={{
+                        display: "flex",
+                        justifyContent: "flex-end",
+                        gap: 8,
+                        marginTop: 12,
+                        paddingTop: 12,
+                        borderTop: "1px solid var(--border-color, #e5e7eb)",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => openEditForm(table)}
+                        disabled={busy}
+                        title="Edit table"
+                      >
+                        <Pencil size={16} />
+                        Edit
+                      </button>
 
-                {/* EDIT / DELETE */}
-                <div
-                  className="card-actions"
-                  style={{
-                    display: "flex",
-                    justifyContent: "flex-end",
-                    gap: 8,
-                    marginTop: 12,
-                    paddingTop: 12,
-                    borderTop: "1px solid var(--border-color, #e5e7eb)",
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => openEditForm(table)}
-                    disabled={busy}
-                    title="Edit table"
-                  >
-                    <Pencil size={16} />
-                    Edit
-                  </button>
-
-                  <button
-                    type="button"
-                    className="danger-button"
-                    onClick={() => handleDelete(table)}
-                    disabled={busy || table.is_occupied === true}
-                    title={
-                      table.is_occupied
-                        ? "Cannot delete a table with an outstanding order or unpaid bill."
-                        : "Delete table"
-                    }
-                  >
-                    <Trash2 size={16} />
-                    {deletingTableId === table.id ? "Deleting..." : "Delete"}
-                  </button>
-                </div>
-              </article>
-            );
-          })}
-        </div>
+                      <button
+                        type="button"
+                        className="danger-button"
+                        onClick={() => handleDelete(table)}
+                        disabled={busy || table.is_occupied === true}
+                        title={
+                          table.is_occupied
+                            ? "Cannot delete a table with an outstanding order or unpaid bill."
+                            : "Delete table"
+                        }
+                      >
+                        <Trash2 size={16} />
+                        {deletingTableId === table.id
+                          ? "Deleting..."
+                          : "Delete"}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

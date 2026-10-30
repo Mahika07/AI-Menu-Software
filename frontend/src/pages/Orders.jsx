@@ -18,8 +18,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 
-import { getRestaurants } from "../api/restaurants";
-import { getBranches } from "../api/branches";
+import { useBranchSelection } from "../context/BranchSelectionContext";
 import {
   getBranchOrders,
   getBranchOrderHistory,
@@ -251,17 +250,20 @@ function printOrderReceipt(order, restaurant, branch) {
 function Orders() {
   const navigate = useNavigate();
 
-  const [restaurants, setRestaurants] = useState([]);
-  const [branches, setBranches] = useState([]);
   const [orders, setOrders] = useState([]);
   const [bills, setBills] = useState([]);
 
-  const [restaurantId, setRestaurantId] = useState("");
-  const [branchId, setBranchId] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const {
+    selectedRestaurant,
+    selectedBranch,
+    selectedRestaurantId,
+    selectedBranchId,
+    loading: loadingSelection,
+  } = useBranchSelection();
 
-  const [loadingRestaurants, setLoadingRestaurants] = useState(true);
-  const [loadingBranches, setLoadingBranches] = useState(false);
+  const restaurantId = selectedRestaurantId;
+  const branchId = selectedBranchId;
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [loadingBills, setLoadingBills] = useState(false);
   const [updatingOrderId, setUpdatingOrderId] = useState(null);
@@ -607,8 +609,6 @@ function Orders() {
   function handleViewBill(bill, fallbackOrder = null) {
     if (!bill) return;
 
-    localStorage.setItem("selected_branch_id", String(branchId));
-
     navigate(`/dashboard/bills/${bill.id}`, {
       state: {
         bill,
@@ -632,8 +632,6 @@ function Orders() {
 
     await loadBills(false);
 
-    localStorage.setItem("selected_branch_id", String(branchId));
-
     navigate(`/dashboard/bills/${bill.id}`, {
       state: {
         bill,
@@ -653,18 +651,10 @@ function Orders() {
     ["pending", "confirmed", "preparing", "ready"].includes(order.status),
   ).length;
 
-  const selectedRestaurant = restaurants.find(
-    (item) => String(item.id) === String(restaurantId),
-  );
-
-  const selectedBranch = branches.find(
-    (item) => String(item.id) === String(branchId),
-  );
-
-  if (loadingRestaurants) {
+  if (loadingSelection) {
     return (
       <div className="page">
-        <div className="loading">Loading restaurants...</div>
+        <div className="loading">Loading restaurant and branch...</div>
       </div>
     );
   }
@@ -703,52 +693,6 @@ function Orders() {
           Refresh
         </button>
       </div>
-
-      <section className="orders-toolbar">
-        <label>
-          Restaurant
-          <select
-            value={restaurantId}
-            onChange={(event) => setRestaurantId(event.target.value)}
-            disabled={restaurants.length === 0}
-          >
-            {restaurants.length === 0 && (
-              <option value="">No restaurants found</option>
-            )}
-
-            {restaurants.map((restaurant) => (
-              <option key={restaurant.id} value={restaurant.id}>
-                {restaurant.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          Branch
-          <select
-            value={branchId}
-            onChange={(event) => {
-              setBranchId(event.target.value);
-              setHistoryPage(0);
-              setTransactionPage(0);
-            }}
-            disabled={loadingBranches || branches.length === 0}
-          >
-            {branches.length === 0 && (
-              <option value="">
-                {loadingBranches ? "Loading branches..." : "No branches found"}
-              </option>
-            )}
-
-            {branches.map((branch) => (
-              <option key={branch.id} value={branch.id}>
-                {branch.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      </section>
 
       <div className="orders-tabs" role="tablist" aria-label="Order views">
         <button
