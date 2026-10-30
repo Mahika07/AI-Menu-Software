@@ -39,6 +39,7 @@ export default function POS() {
   const navigate = useNavigate();
 
   const {
+    branches = [],
     selectedBranchId,
     selectedRestaurantId,
     loading: loadingSelection,
@@ -75,26 +76,23 @@ export default function POS() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
   useEffect(() => {
-    // Never carry an unfinished order into another branch.
     setCart([]);
     setTableId("");
-
     setCustomerName("");
     setCustomerNumber("");
     setCustomerNote("");
     setCustomerId(null);
     setCustomerSearch("");
     setCustomerResults([]);
-
     setDiscount("0");
     setTaxRate("0");
     setCollectPayment(false);
-
     setError("");
     setNotice("");
   }, [branchId]);
-  // Search saved customers only within the currently selected branch.
+
   useEffect(() => {
     if (!branchId || !customerSearch.trim()) {
       setCustomerResults([]);
@@ -103,14 +101,17 @@ export default function POS() {
     }
 
     let cancelled = false;
+
     const timer = window.setTimeout(async () => {
       setCustomerSearchLoading(true);
+
       try {
         const rows = await getCustomers(branchId, {
           search: customerSearch.trim(),
           limit: 10,
           offset: 0,
         });
+
         const customers = Array.isArray(rows)
           ? rows
           : Array.isArray(rows?.items)
@@ -118,6 +119,7 @@ export default function POS() {
             : Array.isArray(rows?.customers)
               ? rows.customers
               : [];
+
         if (!cancelled) setCustomerResults(customers);
       } catch {
         if (!cancelled) setCustomerResults([]);
@@ -135,11 +137,13 @@ export default function POS() {
   function selectCustomer(customer) {
     setCustomerId(customer.id);
     setCustomerName(customer.name || "");
+
     setCustomerNumber(
       String(customer.phone || "")
         .replace(/\D/g, "")
         .slice(0, 10),
     );
+
     setCustomerSearch(customer.name || customer.phone || "");
     setCustomerResults([]);
     setNotice(`Selected saved customer: ${customer.name}.`);
@@ -148,11 +152,14 @@ export default function POS() {
 
   async function saveCurrentCustomer() {
     if (!branchId) return;
+
     const normalizedPhone = customerNumber.replace(/\D/g, "");
+
     if (!customerName.trim()) {
       setError("Enter the customer's name before saving the customer record.");
       return;
     }
+
     if (!/^[6-9]\d{9}$/.test(normalizedPhone)) {
       setError("Enter a valid 10-digit Indian mobile number before saving.");
       return;
@@ -160,19 +167,23 @@ export default function POS() {
 
     setCustomerSaving(true);
     setError("");
+
     try {
       const customer = await createCustomer(branchId, {
         name: customerName.trim(),
         phone: normalizedPhone,
       });
+
       setCustomerId(customer.id);
       setCustomerSearch(customer.name || customerName.trim());
       setCustomerResults([]);
+
       setNotice(
         `Customer ${customer.name || customerName.trim()} saved successfully.`,
       );
     } catch (err) {
       const detail = err.response?.data?.detail;
+
       setError(
         err.response?.status === 409
           ? "A customer with this mobile number already exists in this branch. Search and select that customer."
@@ -185,7 +196,6 @@ export default function POS() {
     }
   }
 
-  // Load menu, tables and recent orders for the selected branch.
   const refreshBranchData = useCallback(async () => {
     if (!branchId) {
       setDishes([]);
@@ -402,6 +412,7 @@ export default function POS() {
       setError("Add at least one dish to the order.");
       return;
     }
+
     const normalizedCustomerNumber = customerNumber.replace(/\D/g, "");
 
     if (!/^[6-9]\d{9}$/.test(normalizedCustomerNumber)) {
@@ -446,7 +457,6 @@ export default function POS() {
     let createdBill = null;
 
     try {
-      // The backend must calculate authoritative order prices.
       createdOrder = await createPOSOrder(branchId, {
         ...(tableId ? { table_id: Number(tableId) } : {}),
         ...(customerId ? { customer_id: customerId } : {}),
@@ -533,6 +543,7 @@ export default function POS() {
       setSubmitting(false);
     }
   }
+
   if (loadingSelection) {
     return (
       <main className="pos-page">
@@ -555,6 +566,7 @@ export default function POS() {
       </main>
     );
   }
+
   return (
     <main className="pos-page">
       <header className="pos-header">
@@ -719,6 +731,7 @@ export default function POS() {
 
             <div className="pos-field">
               <span>Find saved customer</span>
+
               <div className="pos-search">
                 <Search size={16} />
                 <input
@@ -733,9 +746,11 @@ export default function POS() {
                   aria-label="Search saved customers"
                 />
               </div>
+
               {customerSearchLoading && (
                 <small className="pos-field-help">Searching customers…</small>
               )}
+
               {!customerSearchLoading &&
                 customerSearch.trim() &&
                 customerResults.length > 0 && (
@@ -760,6 +775,7 @@ export default function POS() {
                     ))}
                   </div>
                 )}
+
               {!customerSearchLoading &&
                 customerSearch.trim() &&
                 !customerResults.length && (
@@ -768,6 +784,7 @@ export default function POS() {
                     and save them.
                   </small>
                 )}
+
               {customerId && (
                 <small className="pos-field-help">
                   Saved customer selected — this order will be linked to their
