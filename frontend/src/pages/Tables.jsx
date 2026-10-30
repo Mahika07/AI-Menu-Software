@@ -217,54 +217,52 @@ function Tables() {
     }
   }
 
-  async function toggleTableAvailability(table) {
-    const makeUnavailable = table.is_unavailable !== true;
-
+  async function changeTableStatus(table, nextStatus) {
     if (table.is_active === false) {
-      setError("Activate this table before changing its availability.");
+      setError("Activate this table before changing its status.");
       return;
     }
 
-    if (makeUnavailable && table.is_occupied) {
-      setError(
-        "This table has an outstanding order or unpaid bill. It cannot be marked unavailable.",
-      );
-      return;
-    }
+    const statusLabels = {
+      available: "Available",
+      occupied: "Occupied",
+      unavailable: "Unavailable",
+    };
 
-    const confirmed = window.confirm(
-      makeUnavailable
-        ? `Mark ${table.table_number} as unavailable for cleaning or maintenance?`
-        : `Restore ${table.table_number} to availability?`,
-    );
+    const messages = {
+      available: `Mark ${table.table_number} as available?`,
+      occupied: `Mark ${table.table_number} as occupied?`,
+      unavailable: `Mark ${table.table_number} as unavailable for maintenance or cleaning?`,
+    };
 
-    if (!confirmed) return;
+    if (!window.confirm(messages[nextStatus])) return;
 
     try {
       setError("");
       setNotice("");
       setUpdatingTableId(table.id);
 
-      await updateTable(branchId, table.id, {
-        is_unavailable: makeUnavailable,
-      });
+      const payload = {
+        is_occupied: nextStatus === "occupied",
+        is_unavailable: nextStatus === "unavailable",
+      };
+
+      await updateTable(branchId, table.id, payload);
 
       setNotice(
-        makeUnavailable
-          ? `${table.table_number} is now unavailable.`
-          : `${table.table_number} is available again.`,
+        `${table.table_number} is now ${statusLabels[nextStatus].toLowerCase()}.`,
       );
 
       await loadTables(false);
     } catch (err) {
       setError(
-        err.response?.data?.detail || "Could not update table availability.",
+        err.response?.data?.detail ||
+          `Could not change table status to ${statusLabels[nextStatus]}.`,
       );
     } finally {
       setUpdatingTableId(null);
     }
   }
-
   async function handleDelete(table) {
     if (table.is_occupied) {
       setError(
@@ -914,43 +912,100 @@ function Tables() {
                 </div>
 
                 {/* AVAILABILITY ACTION */}
+                {/* TABLE STATUS ACTIONS */}
                 {table.is_active !== false && (
-                  <button
-                    type="button"
-                    className={
-                      table.is_unavailable
-                        ? "primary-button"
-                        : "secondary-button"
-                    }
+                  <div
                     style={{
-                      width: "100%",
-                      marginTop: 12,
-                      justifyContent: "center",
+                      display: "grid",
+                      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                      gap: 8,
+                      marginTop: 14,
                     }}
-                    disabled={busy || table.is_occupied === true}
-                    onClick={() => toggleTableAvailability(table)}
-                    title={
-                      table.is_occupied
-                        ? "Resolve the outstanding order or bill first."
-                        : ""
-                    }
                   >
-                    {table.is_unavailable ? (
+                    {tableStatus.key === "available" && (
                       <>
-                        <CheckCircle2 size={16} />
-                        {updatingTableId === table.id
-                          ? "Restoring..."
-                          : "Restore Availability"}
-                      </>
-                    ) : (
-                      <>
-                        <Ban size={16} />
-                        {updatingTableId === table.id
-                          ? "Updating..."
-                          : "Mark Unavailable"}
+                        <button
+                          type="button"
+                          className="primary-button"
+                          disabled={busy}
+                          onClick={() => changeTableStatus(table, "occupied")}
+                          style={{ justifyContent: "center" }}
+                        >
+                          <Armchair size={16} />
+                          Mark Occupied
+                        </button>
+
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          disabled={busy}
+                          onClick={() =>
+                            changeTableStatus(table, "unavailable")
+                          }
+                          style={{ justifyContent: "center" }}
+                        >
+                          <Ban size={16} />
+                          Mark Unavailable
+                        </button>
                       </>
                     )}
-                  </button>
+
+                    {tableStatus.key === "occupied" && (
+                      <>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          disabled={busy}
+                          onClick={() => changeTableStatus(table, "available")}
+                          style={{ justifyContent: "center" }}
+                        >
+                          <CheckCircle2 size={16} />
+                          Mark Available
+                        </button>
+
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          disabled={busy}
+                          onClick={() =>
+                            changeTableStatus(table, "unavailable")
+                          }
+                          style={{ justifyContent: "center" }}
+                        >
+                          <Ban size={16} />
+                          Mark Unavailable
+                        </button>
+                      </>
+                    )}
+
+                    {tableStatus.key === "unavailable" && (
+                      <button
+                        type="button"
+                        className="primary-button"
+                        disabled={busy}
+                        onClick={() => changeTableStatus(table, "available")}
+                        style={{
+                          gridColumn: "1 / -1",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <CheckCircle2 size={16} />
+                        Mark Available
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {busy && (
+                  <p
+                    style={{
+                      fontSize: 12,
+                      color: "var(--muted-text, #64748b)",
+                      marginTop: 8,
+                    }}
+                  >
+                    Updating table status...
+                  </p>
                 )}
 
                 {/* EDIT / DELETE */}

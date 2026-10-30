@@ -251,43 +251,48 @@ def update_table(
 
     outstanding = table_has_outstanding_order(db, table)
 
+# A table with an outstanding order or unpaid bill
+# cannot be marked available.
     if updates.get("is_occupied") is False and outstanding:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "This table cannot be marked available while it has an "
-                "outstanding order or unpaid bill."
-            ),
-        )
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+            "This table cannot be marked available while it has "
+            "an outstanding order or unpaid bill."
+        ),
+    )
 
+# An unavailable table must first be made available
+# before it can be occupied.
     if updates.get("is_occupied") is True and table.is_unavailable:
         raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Make this table available before marking it occupied.",
+    )
+
+# A table cannot become unavailable while occupied
+# or while it has outstanding orders.
+    if updates.get("is_unavailable") is True:
+        if table.is_occupied or outstanding:
+            raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                "Mark the table available for service before marking it occupied."
+                "This table cannot be marked unavailable while occupied "
+                "or while it has an outstanding order or unpaid bill."
             ),
         )
 
-    if updates.get("is_unavailable") is True:
-        if outstanding or table.is_occupied:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "This table cannot be marked unavailable while it is "
-                    "occupied or has an outstanding order or unpaid bill."
-                ),
-            )
-
+# Do not allow deactivation while occupied.
     if updates.get("is_active") is False:
-        if outstanding or table.is_occupied:
+        if table.is_occupied or outstanding:
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "This table cannot be deactivated while it is occupied "
-                    "or has an outstanding order or unpaid bill."
-                ),
-            )
-
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This table cannot be deactivated while occupied "
+                "or while it has an outstanding order or unpaid bill."
+            ),
+        )
+    
     for field, value in updates.items():
         setattr(table, field, value)
 
