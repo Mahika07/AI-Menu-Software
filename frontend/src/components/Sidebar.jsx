@@ -18,8 +18,7 @@ import {
   Armchair,
 } from "lucide-react";
 
-import { getRestaurants } from "../api/restaurants";
-import { getBranches } from "../api/branches";
+import { useBranchSelection } from "../context/BranchSelectionContext";
 import { getBranchOrders } from "../api/orders";
 import { getTables } from "../api/tables";
 
@@ -79,37 +78,7 @@ export default function Sidebar({ open = false, onNavigate, onClose }) {
 
   const [activeOrderCount, setActiveOrderCount] = useState(0);
   const [availableTableCount, setAvailableTableCount] = useState(0);
-  const [branchId, setBranchId] = useState("");
-
-  // Load the first available branch.
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadBranch() {
-      try {
-        const restaurants = await getRestaurants();
-
-        if (cancelled || !Array.isArray(restaurants) || !restaurants.length) {
-          return;
-        }
-
-        const restaurantId = restaurants[0].id;
-        const branches = await getBranches(restaurantId);
-
-        if (!cancelled && Array.isArray(branches) && branches.length) {
-          setBranchId(String(branches[0].id));
-        }
-      } catch (error) {
-        console.error("Unable to load sidebar branch:", error);
-      }
-    }
-
-    loadBranch();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { selectedBranchId: branchId } = useBranchSelection();
 
   // Refresh active orders every five seconds.
   useEffect(() => {

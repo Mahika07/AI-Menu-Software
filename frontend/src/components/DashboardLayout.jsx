@@ -2,11 +2,14 @@ import { useEffect, useState } from "react";
 import { Menu, ShoppingBag } from "lucide-react";
 
 import Sidebar from "./Sidebar";
+import RestaurantBranchSelector from "./RestaurantBranchSelector";
+import { useBranchSelection } from "../context/BranchSelectionContext";
 
 const DRAWER_BREAKPOINT = 1024;
 
 function DashboardLayout({ children }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const { selectedBranchId } = useBranchSelection();
 
   function closeMenu() {
     setMenuOpen(false);
@@ -67,7 +70,16 @@ function DashboardLayout({ children }) {
 
       <Sidebar open={menuOpen} onNavigate={closeMenu} onClose={closeMenu} />
 
-      <main className="dashboard-layout-content">{children}</main>
+      <main className="dashboard-layout-content">
+        <div className="global-dashboard-toolbar">
+          <div className="global-dashboard-toolbar-copy">
+            <span className="global-dashboard-eyebrow">WORKSPACE</span>
+            <strong>Current location</strong>
+          </div>
+          <RestaurantBranchSelector />
+        </div>
+        <div key={selectedBranchId || "no-selected-branch"}>{children}</div>
+      </main>
     </div>
   );
 }
