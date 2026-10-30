@@ -13,6 +13,7 @@ import Analytics from "./pages/Analytics";
 import Reviews from "./pages/Reviews";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardLayout from "./components/DashboardLayout";
+import { BranchSelectionProvider } from "./context/BranchSelectionContext";
 import KitchenDisplay from "./pages/KitchenDisplay";
 import TrackOrder from "./pages/TrackOrder";
 import SalesAnalytics from "./pages/SalesAnalytics";
@@ -29,10 +30,14 @@ import Reports from "./pages/Reports";
 import BusinessReports from "./pages/BusinessReports";
 import TableStatus from "./pages/TableStatus";
 function ProtectedLayout({ children }) {
+  // The provider must be an ancestor of DashboardLayout, Sidebar, and every
+  // dashboard page that calls useBranchSelection().
   return (
-    <ProtectedRoute>
-      <DashboardLayout>{children}</DashboardLayout>
-    </ProtectedRoute>
+    <BranchSelectionProvider>
+      <ProtectedRoute>
+        <DashboardLayout>{children}</DashboardLayout>
+      </ProtectedRoute>
+    </BranchSelectionProvider>
   );
 }
 
