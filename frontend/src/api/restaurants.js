@@ -20,14 +20,20 @@ export async function deleteRestaurant(id) {
     return response.data;
 }
 
-// Upload restaurant logo
 export async function uploadRestaurantLogo(file) {
     const formData = new FormData();
-    formData.append("file", file);
+
+    // Field name must match FastAPI parameter: file
+    formData.append("file", file, file.name);
 
     const response = await api.post(
         "/restaurants/upload-logo",
-        formData
+        formData,
+        {
+            headers: {
+                "Content-Type": "multipart/form-data",
+            },
+        }
     );
 
     return response.data;
