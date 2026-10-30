@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-
+import { getErrorMessage } from "../utils/errorMessage";
 import {
   Store,
   Plus,
@@ -214,7 +214,7 @@ function Restaurants() {
     } catch (err) {
       console.error(err);
 
-      setError(err.response?.data?.detail || "Unable to save restaurant.");
+      setError(getErrorMessage(err));
     } finally {
       setSaving(false);
     }
