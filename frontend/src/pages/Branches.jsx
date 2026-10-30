@@ -60,6 +60,9 @@ function Branches() {
   const { restaurantId } = useParams();
 
   const [branches, setBranches] = useState([]);
+  const [selectedBranchId, setSelectedBranchId] = useState(
+    localStorage.getItem("selected_branch_id"),
+  );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -100,9 +103,13 @@ function Branches() {
       return;
     }
 
-    localStorage.setItem("selected_branch_id", String(branch.id));
+    const branchId = String(branch.id);
 
+    localStorage.setItem("selected_branch_id", branchId);
     localStorage.setItem("selected_restaurant_id", String(restaurantId));
+
+    // Immediately update React UI
+    setSelectedBranchId(branchId);
   }
 
   // --------------------------------------------------
@@ -114,6 +121,7 @@ function Branches() {
 
     if (activeBranches.length === 0) {
       localStorage.removeItem("selected_branch_id");
+      setSelectedBranchId(null);
       return;
     }
 
@@ -124,12 +132,12 @@ function Branches() {
     );
 
     if (currentSelectedBranch) {
+      setSelectedBranchId(String(currentSelectedBranch.id));
       return;
     }
 
     selectBranch(activeBranches[0]);
   }
-
   // --------------------------------------------------
   // Load branches
   // --------------------------------------------------
@@ -378,6 +386,7 @@ function Branches() {
 
         if (String(branch.id) === String(selectedId)) {
           localStorage.removeItem("selected_branch_id");
+          setSelectedBranchId(null);
         }
 
         syncSelectedBranch(updatedBranches);
@@ -448,8 +457,6 @@ function Branches() {
   // --------------------------------------------------
   // Render
   // --------------------------------------------------
-
-  const selectedBranchId = localStorage.getItem("selected_branch_id");
 
   const addressLength = form.address.trim().length;
 
