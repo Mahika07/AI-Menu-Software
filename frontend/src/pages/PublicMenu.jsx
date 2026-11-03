@@ -78,6 +78,31 @@ function PublicMenu() {
   const [customerName, setCustomerName] = useState("");
   const [customerNumber, setCustomerNumber] = useState("");
   const [customerNote, setCustomerNote] = useState("");
+
+  // Restore customer details for this table so repeat orders do not ask again.
+  useEffect(() => {
+    if (!qrToken) return;
+
+    try {
+      const savedDetails = window.localStorage.getItem(
+        `smart-menu:customer-details:${qrToken}`,
+      );
+
+      if (savedDetails) {
+        const parsed = JSON.parse(savedDetails);
+        setCustomerName(
+          typeof parsed.customerName === "string" ? parsed.customerName : "",
+        );
+        setCustomerNumber(
+          typeof parsed.customerNumber === "string"
+            ? parsed.customerNumber
+            : "",
+        );
+      }
+    } catch {
+      // Ignore invalid or unavailable browser storage.
+    }
+  }, [qrToken]);
   const [checkoutError, setCheckoutError] = useState("");
   const [submittingOrder, setSubmittingOrder] = useState(false);
 
@@ -460,6 +485,19 @@ function PublicMenu() {
 
       const order = await createDineInOrder(qrToken, payload);
 
+      // Remember the customer's name and phone for future orders at this table.
+      try {
+        window.localStorage.setItem(
+          `smart-menu:customer-details:${qrToken}`,
+          JSON.stringify({
+            customerName: customerName.trim(),
+            customerNumber: customerNumber.trim(),
+          }),
+        );
+      } catch {
+        // Ordering should still succeed if browser storage is unavailable.
+      }
+
       setActiveOrder(order);
       setTableOrders((current) => [
         order,
@@ -468,8 +506,6 @@ function PublicMenu() {
       setCart([]);
       setCheckoutOpen(false);
       setCartOpen(false);
-      setCustomerName("");
-      setCustomerNumber("");
       setCustomerNote("");
       setTrackingError("");
 
