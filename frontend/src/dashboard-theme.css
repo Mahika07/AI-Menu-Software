@@ -1174,3 +1174,7 @@
 .branch {
   margin: 0px 10px;
 }
+
+select {
+  padding: 5px 10px;
+}

@@ -1023,9 +1023,9 @@ function PublicMenu() {
               <div>
                 <h2 id="cart-title">Your order</h2>
                 <p>
-                  {tableOrders.length > 0
-                    ? `${tableOrders.length} ${tableOrders.length === 1 ? "order" : "orders"}`
-                    : `${cartCount} ${cartCount === 1 ? "item" : "items"}`}
+                  {cart.length > 0
+                    ? `${cartCount} ${cartCount === 1 ? "new item" : "new items"}`
+                    : `${tableOrders.length} ${tableOrders.length === 1 ? "previous order" : "previous orders"}`}
                 </p>
               </div>
 
@@ -1039,7 +1039,7 @@ function PublicMenu() {
               </button>
             </div>
 
-            {tableOrders.length > 0 ? (
+            {tableOrders.length > 0 && cart.length === 0 ? (
               <div className="my-order-details">
                 {tableOrders.map((order) => (
                   <article className="my-table-order" key={order.order_number}>
