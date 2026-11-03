@@ -76,6 +76,7 @@ function PublicMenu() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
 
   const [customerName, setCustomerName] = useState("");
+  const [customerNumber, setCustomerNumber] = useState("");
   const [customerNote, setCustomerNote] = useState("");
   const [checkoutError, setCheckoutError] = useState("");
   const [submittingOrder, setSubmittingOrder] = useState(false);
@@ -122,6 +123,7 @@ function PublicMenu() {
       cancelled = true;
     };
   }, [qrToken]);
+
   // Create or restore the current table's dining session.
   useEffect(() => {
     if (!qrToken) {
@@ -419,11 +421,20 @@ function PublicMenu() {
 
     return () => observer.disconnect();
   }, [filteredCategories]);
-
   async function submitOrder(event) {
     event.preventDefault();
 
     if (!qrToken || cart.length === 0 || submittingOrder) return;
+
+    if (!customerName.trim() || !customerNumber.trim()) {
+      setCheckoutError("Please enter your name and phone number to continue.");
+      return;
+    }
+
+    if (!/^[+0-9()\s-]{7,20}$/.test(customerNumber.trim())) {
+      setCheckoutError("Please enter a valid phone number (7–20 characters). ");
+      return;
+    }
 
     if (!diningSessionReady) {
       setCheckoutError(
@@ -437,7 +448,8 @@ function PublicMenu() {
 
     try {
       const payload = {
-        customer_name: customerName.trim() || null,
+        customer_name: customerName.trim(),
+        customer_number: customerNumber.trim(),
         customer_note: customerNote.trim() || null,
         items: cart.map((item) => ({
           dish_id: item.dish.id,
@@ -457,6 +469,7 @@ function PublicMenu() {
       setCheckoutOpen(false);
       setCartOpen(false);
       setCustomerName("");
+      setCustomerNumber("");
       setCustomerNote("");
       setTrackingError("");
 
@@ -711,7 +724,6 @@ function PublicMenu() {
           </div>
         </section>
       )}
-
       <section className="public-menu-controls">
         <div className="public-menu-search">
           <Search size={20} />
@@ -1099,7 +1111,6 @@ function PublicMenu() {
                         </div>
                       </article>
                     ))}
-
                     <button
                       type="button"
                       className="order-secondary-button"
@@ -1152,7 +1163,6 @@ function PublicMenu() {
                 </button>
               </div>
             ) : (
-              // Keep your existing cart-items and checkout JSX here.
               <div className="order-cart-items">
                 {cart.map((item) => (
                   <article className="order-cart-item" key={item.dish.id}>
@@ -1271,14 +1281,32 @@ function PublicMenu() {
 
             <form className="order-checkout-form" onSubmit={submitOrder}>
               <label>
-                Your name <span>(optional)</span>
+                Your name <span className="required-field">(required)</span>
                 <input
                   type="text"
                   maxLength={100}
                   value={customerName}
                   onChange={(event) => setCustomerName(event.target.value)}
-                  placeholder="Enter your name"
+                  placeholder="Enter your full name"
                   autoComplete="name"
+                  required
+                />
+              </label>
+
+              <label>
+                Phone number <span className="required-field">(required)</span>
+                <input
+                  type="tel"
+                  inputMode="tel"
+                  maxLength={20}
+                  minLength={7}
+                  value={customerNumber}
+                  onChange={(event) => setCustomerNumber(event.target.value)}
+                  placeholder="Enter your phone number"
+                  autoComplete="tel"
+                  pattern="[+0-9()\s-]{7,20}"
+                  title="Enter a valid phone number (7–20 characters)."
+                  required
                 />
               </label>
 

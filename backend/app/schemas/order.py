@@ -40,15 +40,59 @@ class OrderItemCreate(BaseModel):
 
 class OrderCreate(BaseModel):
     customer_id: int | None = Field(default=None, gt=0)
-    customer_name: str | None = Field(default=None, max_length=100)
-    customer_number: str | None = Field(default=None, max_length=20)
-    customer_note: str | None = Field(default=None, max_length=1000)
 
-    items: list[OrderItemCreate] = Field(min_length=1, max_length=30)
+    customer_name: str = Field(
+        min_length=1,
+        max_length=100,
+    )
 
-    @field_validator("customer_name", "customer_number", "customer_note")
+    customer_number: str = Field(
+        min_length=7,
+        max_length=20,
+    )
+
+    customer_note: str | None = Field(
+        default=None,
+        max_length=1000,
+    )
+
+    items: list[OrderItemCreate] = Field(
+        min_length=1,
+        max_length=30,
+    )
+
+    @field_validator("customer_name")
     @classmethod
-    def clean_optional_text(cls, value: str | None) -> str | None:
+    def validate_customer_name(cls, value: str) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError("Customer name is required.")
+
+        return value
+
+    @field_validator("customer_number")
+    @classmethod
+    def validate_customer_number(cls, value: str) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError("Phone number is required.")
+
+        if not 7 <= len(value) <= 20:
+            raise ValueError("Phone number must contain 7–20 characters.")
+
+        if not all(char in "+0123456789()- " for char in value):
+            raise ValueError("Please enter a valid phone number.")
+
+        if sum(char.isdigit() for char in value) < 7:
+            raise ValueError("Phone number must contain at least 7 digits.")
+
+        return value
+
+    @field_validator("customer_note")
+    @classmethod
+    def clean_customer_note(cls, value: str | None) -> str | None:
         return value.strip() or None if value is not None else None
 
     @field_validator("items")
@@ -66,7 +110,6 @@ class OrderCreate(BaseModel):
             )
 
         return items
-
 
 class OrderStatusUpdate(BaseModel):
     status: OrderStatus
