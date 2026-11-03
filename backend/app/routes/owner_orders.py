@@ -152,39 +152,70 @@ def set_item_status(
 
 
 
+
 def recalculate_bill_for_order(
     db: Session,
     order: Order,
     cancelled_by: str,
 ) -> None:
     """
-    Recalculate the bill using active order items only.
+    Recalculate a bill using all orders in its dining session.
 
-    Cancelled items remain in the order history.
-    Their original prices and quantities are not changed.
+    Legacy bills without a dining_session_id continue to use
+    their individual order.
+    Cancelled items remain in order history.
     """
 
-    bill = (
-        db.query(Bill)
-        .filter(Bill.order_id == order.id)
-        .with_for_update()
-        .first()
+    bill_query = db.query(Bill).filter(
+        Bill.branch_id == order.branch_id,
     )
+
+    if order.dining_session_id is not None:
+        bill_query = bill_query.filter(
+            Bill.dining_session_id == order.dining_session_id
+        )
+    else:
+        bill_query = bill_query.filter(
+            Bill.order_id == order.id
+        )
+
+    bill = bill_query.with_for_update().first()
 
     if bill is None:
         return
 
-    cancelled_items = [
-        item
-        for item in order.items
-        if (item.status or "pending") == "cancelled"
-    ]
+    # Do not silently modify a bill that has already been paid.
+    if bill.payment_status == "paid":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This dining session's bill has already been paid. "
+                "Cancellation cannot be processed without a refund workflow."
+            ),
+        )
 
-    active_items = [
-        item
-        for item in order.items
-        if (item.status or "pending") != "cancelled"
-    ]
+    if order.dining_session_id is not None:
+        orders = (
+            db.query(Order)
+            .options(selectinload(Order.items))
+            .filter(
+                Order.dining_session_id == order.dining_session_id,
+                Order.branch_id == order.branch_id,
+            )
+            .all()
+        )
+    else:
+        orders = [order]
+
+    cancelled_items = []
+    active_items = []
+
+    for session_order in orders:
+        for item in session_order.items:
+            if (item.status or "pending").lower() == "cancelled":
+                cancelled_items.append(item)
+            else:
+                active_items.append(item)
 
     cancelled_amount = money(
         sum(
@@ -223,17 +254,14 @@ def recalculate_bill_for_order(
         Decimal("0.00"),
     )
 
-    # Preserve the effective tax rate already used by this bill.
+    # Preserve the effective tax rate already used by the bill.
     tax_rate = (
         old_tax / old_taxable_amount
         if old_taxable_amount > 0
         else Decimal("0.00")
     )
 
-    new_discount = min(
-        old_discount,
-        new_subtotal,
-    )
+    new_discount = min(old_discount, new_subtotal)
 
     new_taxable_amount = max(
         new_subtotal - new_discount,
@@ -244,14 +272,12 @@ def recalculate_bill_for_order(
         new_taxable_amount * tax_rate
     )
 
-    new_total = money(
-        new_taxable_amount + new_tax
-    )
-
     bill.subtotal = new_subtotal
     bill.discount_amount = new_discount
     bill.tax_amount = new_tax
-    bill.total_amount = new_total
+    bill.total_amount = money(
+        new_taxable_amount + new_tax
+    )
 
     bill.cancelled_amount = cancelled_amount
     bill.cancelled_by = cancelled_by

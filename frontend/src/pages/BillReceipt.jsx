@@ -17,25 +17,64 @@ const formatDate = (value) =>
       })
     : "—";
 
+const isCancelled = (item) =>
+  String(item.status || "pending").toLowerCase() === "cancelled";
+
+const getItemTotal = (item) => {
+  if (item.line_total != null) {
+    return Number(item.line_total);
+  }
+
+  return Number(item.unit_price || 0) * Number(item.quantity || 0);
+};
+
 export default function BillReceipt({ bill, order, restaurant, branch }) {
   const navigate = useNavigate();
 
-  // Keep every original order item in the receipt, including cancelled items.
-  const items = useMemo(() => order?.items || [], [order]);
-  const cancelledItems = useMemo(
+  // New session bills use bill.orders.
+  // Older bills continue to use bill.order or the supplied order prop.
+  const orders = useMemo(() => {
+    if (Array.isArray(bill?.orders) && bill.orders.length > 0) {
+      return bill.orders;
+    }
+
+    const legacyOrder = bill?.order || order;
+
+    return legacyOrder ? [legacyOrder] : [];
+  }, [bill, order]);
+
+  const allItems = useMemo(
     () =>
-      items.filter(
-        (item) =>
-          String(item.status || "pending").toLowerCase() === "cancelled",
+      orders.flatMap((currentOrder) =>
+        (currentOrder.items || []).map((item) => ({
+          ...item,
+          receiptOrderId: currentOrder.id,
+          receiptOrderNumber:
+            currentOrder.order_number || `#${currentOrder.id}`,
+        })),
       ),
-    [items],
+    [orders],
+  );
+
+  const cancelledItems = useMemo(
+    () => allItems.filter(isCancelled),
+    [allItems],
   );
 
   const paymentStatus = String(bill?.payment_status || "unpaid").toLowerCase();
+
   const isPaid = paymentStatus === "paid";
   const cancelledAmount = Number(bill?.cancelled_amount || 0);
 
-  if (!bill || !order) {
+  const firstOrder = orders[0];
+
+  const customerNames = [
+    ...new Set(
+      orders.map((currentOrder) => currentOrder.customer_name).filter(Boolean),
+    ),
+  ];
+
+  if (!bill || orders.length === 0) {
     return (
       <main className="receipt-page">
         <div className="receipt-empty">
@@ -67,6 +106,7 @@ export default function BillReceipt({ bill, order, restaurant, branch }) {
           <h1>{restaurant?.name || "Restaurant"}</h1>
 
           {branch?.name && <p className="receipt-branch">{branch.name}</p>}
+
           {branch?.address && <p>{branch.address}</p>}
           {branch?.phone && <p>Phone: {branch.phone}</p>}
 
@@ -82,13 +122,17 @@ export default function BillReceipt({ bill, order, restaurant, branch }) {
           </div>
 
           <div>
-            <span>Order number</span>
-            <strong>{order.order_number || order.id}</strong>
+            <span>{orders.length > 1 ? "Orders" : "Order number"}</span>
+            <strong>
+              {orders.length > 1
+                ? orders.length
+                : firstOrder.order_number || firstOrder.id}
+            </strong>
           </div>
 
           <div>
             <span>Table</span>
-            <strong>{order.table_number || "—"}</strong>
+            <strong>{firstOrder.table_number || "—"}</strong>
           </div>
 
           <div>
@@ -96,66 +140,108 @@ export default function BillReceipt({ bill, order, restaurant, branch }) {
             <strong>{formatDate(bill.created_at)}</strong>
           </div>
 
-          {order.customer_name && (
+          {customerNames.length > 0 && (
             <div>
               <span>Customer</span>
-              <strong>{order.customer_name}</strong>
+              <strong>{customerNames.join(", ")}</strong>
+            </div>
+          )}
+
+          {bill.dining_session_id && (
+            <div>
+              <span>Dining session</span>
+              <strong>#{bill.dining_session_id}</strong>
             </div>
           )}
         </div>
 
         <div className="receipt-items">
-          <div className="receipt-items-heading">
-            <span>Item</span>
-            <span>Qty</span>
-            <span>Price</span>
-            <span>Total</span>
-          </div>
-
-          {items.map((item, index) => {
-            const isCancelled =
-              String(item.status || "pending").toLowerCase() === "cancelled";
+          {orders.map((currentOrder) => {
+            const items = currentOrder.items || [];
 
             return (
-              <div
-                className={`receipt-item ${isCancelled ? "receipt-item-cancelled" : ""}`}
-                key={item.id ?? `${item.dish_name}-${index}`}
-                style={
-                  isCancelled
-                    ? {
-                        color: "#8b8b8b",
-                        background: "#fafafa",
-                        textDecoration: "line-through",
-                      }
-                    : undefined
-                }
-              >
-                <span>
-                  {item.dish_name || "Menu item"}
-                  {isCancelled && (
-                    <small
-                      className="receipt-cancelled-label"
-                      style={{
-                        display: "block",
-                        color: "#b45309",
-                        fontWeight: 700,
-                        textDecoration: "none",
-                      }}
-                    >
-                      Cancelled · Not charged
-                    </small>
+              <section className="receipt-order-section" key={currentOrder.id}>
+                <div className="receipt-order-title">
+                  <strong>
+                    Order {currentOrder.order_number || `#${currentOrder.id}`}
+                  </strong>
+
+                  {currentOrder.table_number && (
+                    <span>Table {currentOrder.table_number}</span>
                   )}
-                </span>
-                <span>{item.quantity}</span>
-                <span>{formatMoney(item.unit_price)}</span>
-                <span>{formatMoney(item.line_total)}</span>
-              </div>
+                </div>
+
+                <div className="receipt-items-heading">
+                  <span>Item</span>
+                  <span>Qty</span>
+                  <span>Price</span>
+                  <span>Total</span>
+                </div>
+
+                {items.map((item, index) => {
+                  const cancelled = isCancelled(item);
+
+                  return (
+                    <div
+                      className={`receipt-item ${
+                        cancelled ? "receipt-item-cancelled" : ""
+                      }`}
+                      key={
+                        item.id ??
+                        `${currentOrder.id}-${item.dish_name}-${index}`
+                      }
+                      style={
+                        cancelled
+                          ? {
+                              color: "#8b8b8b",
+                              background: "#fafafa",
+                              textDecoration: "line-through",
+                            }
+                          : undefined
+                      }
+                    >
+                      <span>
+                        {item.dish_name || "Menu item"}
+
+                        {cancelled && (
+                          <small
+                            className="receipt-cancelled-label"
+                            style={{
+                              display: "block",
+                              color: "#b45309",
+                              fontWeight: 700,
+                              textDecoration: "none",
+                            }}
+                          >
+                            Cancelled · Not charged
+                          </small>
+                        )}
+
+                        {item.special_instructions && (
+                          <small
+                            style={{
+                              display: "block",
+                              textDecoration: "none",
+                            }}
+                          >
+                            Note: {item.special_instructions}
+                          </small>
+                        )}
+                      </span>
+
+                      <span>{item.quantity}</span>
+                      <span>{formatMoney(item.unit_price)}</span>
+                      <span>{formatMoney(getItemTotal(item))}</span>
+                    </div>
+                  );
+                })}
+
+                {items.length === 0 && (
+                  <p className="receipt-no-items">No items in this order.</p>
+                )}
+              </section>
             );
           })}
-
-          {items.length === 0 && (
-            <p className="receipt-no-items">No order items were provided.</p>
-          )}
         </div>
 
         {cancelledItems.length > 0 && (
@@ -170,18 +256,22 @@ export default function BillReceipt({ bill, order, restaurant, branch }) {
             }}
           >
             <strong style={{ color: "#92400e" }}>Cancellation details</strong>
+
             <p style={{ margin: "6px 0 0", color: "#6b5a43" }}>
               {cancelledItems.length} item
-              {cancelledItems.length === 1 ? "" : "s"} cancelled. Cancelled
-              items are retained for order history and are not included in the
-              payable total.
+              {cancelledItems.length === 1 ? "" : "s"} cancelled across{" "}
+              {orders.length} order
+              {orders.length === 1 ? "" : "s"}. Cancelled items are retained for
+              order history and are excluded from the payable total.
             </p>
+
             {bill.cancelled_by && (
               <p style={{ margin: "6px 0 0" }}>
                 <span>Cancelled by: </span>
                 <strong>{String(bill.cancelled_by).toUpperCase()}</strong>
               </p>
             )}
+
             {bill.cancelled_at && (
               <p style={{ margin: "4px 0 0" }}>
                 <span>Cancellation date: </span>
@@ -224,6 +314,7 @@ export default function BillReceipt({ bill, order, restaurant, branch }) {
 
         <section className="receipt-payment">
           <span>Payment status</span>
+
           <strong
             className={`payment-status ${isPaid ? "is-paid" : "is-unpaid"}`}
           >
@@ -239,6 +330,7 @@ export default function BillReceipt({ bill, order, restaurant, branch }) {
                 {String(bill.payment_method || "").toUpperCase() || "—"}
               </strong>
             </div>
+
             <div>
               <span>Paid at</span>
               <strong>{formatDate(bill.paid_at)}</strong>

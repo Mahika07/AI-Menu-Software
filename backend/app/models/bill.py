@@ -26,9 +26,21 @@ class Bill(Base):
         index=True,
     )
 
+    # Primary/anchor order.
+    # Retained for compatibility with existing bills and APIs.
     order_id: Mapped[int] = mapped_column(
         ForeignKey("orders.id", ondelete="RESTRICT"),
         nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    # Multiple orders can belong to one dining session.
+    # A unique index ensures only one bill per dining session.
+    # Nullable so existing historical bills remain valid.
+    dining_session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("dining_sessions.id", ondelete="RESTRICT"),
+        nullable=True,
         unique=True,
         index=True,
     )
@@ -104,5 +116,7 @@ class Bill(Base):
         server_default=func.now(),
     )
 
+    # Relationships
     order = relationship("Order")
+    dining_session = relationship("DiningSession")
     branch = relationship("Branch")

@@ -287,13 +287,12 @@ function Orders() {
     loading: loadingSelection,
   } = useBranchSelection();
 
-  const restaurantId = selectedRestaurantId;
   const branchId = selectedBranchId;
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [loadingBills, setLoadingBills] = useState(false);
   const [updatingOrderId, setUpdatingOrderId] = useState(null);
 
-  const [billingOrder, setBillingOrder] = useState(null);
+  const [billingContext, setBillingContext] = useState(null);
   const [error, setError] = useState("");
   const [lastUpdated, setLastUpdated] = useState(null);
 
@@ -323,89 +322,6 @@ function Orders() {
   const [loadingTransactions, setLoadingTransactions] = useState(false);
   const [transactionError, setTransactionError] = useState("");
 
-  // Load restaurants.
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadRestaurants() {
-      try {
-        setLoadingRestaurants(true);
-        setError("");
-
-        const data = await getRestaurants();
-
-        if (cancelled) return;
-
-        setRestaurants(data);
-
-        if (data.length > 0) {
-          setRestaurantId(String(data[0].id));
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(
-            err.response?.data?.detail || "Unable to load your restaurants.",
-          );
-        }
-      } finally {
-        if (!cancelled) setLoadingRestaurants(false);
-      }
-    }
-
-    loadRestaurants();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Load branches when the restaurant changes.
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadBranches() {
-      setBranches([]);
-      setBranchId("");
-      setOrders([]);
-      setBills([]);
-      setHistoryOrders([]);
-      setHistoryTotal(0);
-      setHistoryPage(0);
-
-      if (!restaurantId) {
-        setLoadingBranches(false);
-        return;
-      }
-
-      try {
-        setLoadingBranches(true);
-        setError("");
-
-        const data = await getBranches(restaurantId);
-
-        if (cancelled) return;
-
-        setBranches(data);
-
-        if (data.length > 0) {
-          setBranchId(String(data[0].id));
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err.response?.data?.detail || "Unable to load branches.");
-        }
-      } finally {
-        if (!cancelled) setLoadingBranches(false);
-      }
-    }
-
-    loadBranches();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [restaurantId]);
-
   // Load live orders.
   const loadOrders = useCallback(
     async (showLoader = false) => {
@@ -417,7 +333,7 @@ function Orders() {
       try {
         if (showLoader) setLoadingOrders(true);
 
-        const data = await getBranchOrders(branchId, statusFilter);
+        const data = await getBranchOrders(branchId);
 
         setOrders(Array.isArray(data) ? data : []);
         setLastUpdated(new Date());
@@ -578,8 +494,37 @@ function Orders() {
     return () => window.clearInterval(intervalId);
   }, [branchId, loadOrders, loadBills]);
 
-  function getBillForOrder(orderId) {
-    return bills.find((bill) => String(bill.order_id) === String(orderId));
+  function getOrdersForSession(diningSessionId) {
+    if (diningSessionId == null) return [];
+
+    return orders.filter(
+      (order) => String(order.dining_session_id) === String(diningSessionId),
+    );
+  }
+
+  function getBillForOrder(order) {
+    if (!order) return undefined;
+
+    return bills.find((bill) => {
+      if (
+        order.dining_session_id != null &&
+        bill.dining_session_id != null &&
+        String(bill.dining_session_id) === String(order.dining_session_id)
+      ) {
+        return true;
+      }
+
+      if (String(bill.order_id) === String(order.id)) {
+        return true;
+      }
+
+      return (
+        Array.isArray(bill.orders) &&
+        bill.orders.some(
+          (billOrder) => String(billOrder.id) === String(order.id),
+        )
+      );
+    });
   }
 
   async function handleStatusChange(order, nextStatus) {
@@ -620,15 +565,37 @@ function Orders() {
       return;
     }
 
-    const existingBill = getBillForOrder(order.id);
+    const existingBill = getBillForOrder(order);
 
     if (existingBill) {
       handleViewBill(existingBill, order);
       return;
     }
 
+    const sessionOrders =
+      order.dining_session_id != null
+        ? getOrdersForSession(order.dining_session_id)
+        : [order];
+
+    const allOrdersReady = sessionOrders.every((sessionOrder) =>
+      ["completed", "cancelled"].includes(
+        String(sessionOrder.status || "").toLowerCase(),
+      ),
+    );
+
+    if (order.dining_session_id != null && !allOrdersReady) {
+      setError(
+        "Complete or cancel every order in this dining session before generating its consolidated bill.",
+      );
+      return;
+    }
+
     setError("");
-    setBillingOrder(order);
+    setBillingContext({
+      order,
+      orders: sessionOrders.length > 0 ? sessionOrders : [order],
+      diningSessionId: order.dining_session_id ?? null,
+    });
   }
 
   function handleViewBill(bill, fallbackOrder = null) {
@@ -650,9 +617,9 @@ function Orders() {
   }
 
   async function handleBillGenerated(bill) {
-    const order = bill.order || billingOrder;
+    const fallbackOrder = billingContext?.order || null;
 
-    setBillingOrder(null);
+    setBillingContext(null);
     setError("");
 
     await loadBills(false);
@@ -660,7 +627,7 @@ function Orders() {
     navigate(`/dashboard/bills/${bill.id}`, {
       state: {
         bill,
-        order,
+        order: bill.order || fallbackOrder,
         restaurant: {
           name:
             bill.restaurant_name || selectedRestaurant?.name || "Restaurant",
@@ -672,7 +639,11 @@ function Orders() {
     });
   }
 
-  const activeCount = orders.filter((order) =>
+  const visibleOrders = statusFilter
+    ? orders.filter((order) => order.status === statusFilter)
+    : orders;
+
+  const activeCount = visibleOrders.filter((order) =>
     ["pending", "confirmed", "preparing", "ready"].includes(order.status),
   ).length;
 
@@ -787,7 +758,7 @@ function Orders() {
           <section className="orders-summary-row">
             <div className="orders-summary-card">
               <span>Orders shown</span>
-              <strong>{orders.length}</strong>
+              <strong>{visibleOrders.length}</strong>
             </div>
 
             <div className="orders-summary-card">
@@ -803,7 +774,7 @@ function Orders() {
             </div>
           </section>
 
-          {!branchId && !loadingBranches ? (
+          {!branchId ? (
             <div className="empty-state">
               <ClipboardList size={38} />
               <h2>No branch selected</h2>
@@ -822,11 +793,32 @@ function Orders() {
             </div>
           ) : (
             <div className="orders-grid">
-              {orders.map((order) => {
+              {visibleOrders.map((order) => {
                 const nextAction = NEXT_ACTIONS[order.status];
                 const updating = updatingOrderId === order.id;
-                const existingBill = getBillForOrder(order.id);
+                const existingBill = getBillForOrder(order);
                 const billCheckPending = loadingBills && !existingBill;
+                const sessionOrders =
+                  order.dining_session_id != null
+                    ? getOrdersForSession(order.dining_session_id)
+                    : [order];
+                const visibleSessionOrders =
+                  order.dining_session_id != null
+                    ? visibleOrders.filter(
+                        (sessionOrder) =>
+                          String(sessionOrder.dining_session_id) ===
+                          String(order.dining_session_id),
+                      )
+                    : [order];
+                const isSessionBillingCard =
+                  order.dining_session_id == null ||
+                  visibleSessionOrders.length === 0 ||
+                  String(order.id) === String(visibleSessionOrders[0].id);
+                const sessionCanBeBilled = sessionOrders.every((sessionOrder) =>
+                  ["completed", "cancelled"].includes(
+                    String(sessionOrder.status || "").toLowerCase(),
+                  ),
+                );
 
                 return (
                   <article
@@ -850,6 +842,11 @@ function Orders() {
                           <Clock size={14} />
                           {formatDate(order.created_at)}
                         </span>
+                        {order.dining_session_id != null && (
+                          <span className="owner-order-time">
+                            Dining session #{order.dining_session_id}
+                          </span>
+                        )}
                       </div>
 
                       <span
@@ -934,17 +931,23 @@ function Orders() {
                     )}
 
                     <footer className="owner-order-actions">
-                      {order.status === "completed" &&
-                        (existingBill ? (
-                          <button
-                            type="button"
-                            className="primary-button"
-                            onClick={() => handleViewBill(existingBill, order)}
-                          >
-                            <ExternalLink size={16} />
-                            View Bill
-                          </button>
-                        ) : (
+                      {isSessionBillingCard && existingBill && (
+                        <button
+                          type="button"
+                          className="primary-button"
+                          onClick={() => handleViewBill(existingBill, order)}
+                        >
+                          <ExternalLink size={16} />
+                          View{" "}
+                          {existingBill.dining_session_id ? "Session " : ""}Bill
+                        </button>
+                      )}
+
+                      {isSessionBillingCard &&
+                        !existingBill &&
+                        (order.dining_session_id != null
+                          ? sessionCanBeBilled
+                          : order.status === "completed") && (
                           <button
                             type="button"
                             className="primary-button"
@@ -958,9 +961,11 @@ function Orders() {
                             <ReceiptText size={16} />
                             {loadingBills
                               ? "Checking bill..."
-                              : "Generate Bill"}
+                              : order.dining_session_id != null
+                                ? "Generate Session Bill"
+                                : "Generate Bill"}
                           </button>
-                        ))}
+                        )}
 
                       <button
                         type="button"
@@ -1027,11 +1032,13 @@ function Orders() {
             </div>
           )}
 
-          {billingOrder && branchId && (
+          {billingContext && branchId && (
             <GenerateBillModal
-              order={billingOrder}
+              order={billingContext.order}
+              orders={billingContext.orders}
+              diningSessionId={billingContext.diningSessionId}
               branchId={branchId}
-              onClose={() => setBillingOrder(null)}
+              onClose={() => setBillingContext(null)}
               onGenerated={handleBillGenerated}
             />
           )}
@@ -1446,7 +1453,13 @@ function Orders() {
           ) : (
             <div className="order-history-list">
               {transactions.map((bill) => {
-                const order = bill.order || {};
+                const billOrders =
+                  Array.isArray(bill.orders) && bill.orders.length > 0
+                    ? bill.orders
+                    : bill.order
+                      ? [bill.order]
+                      : [];
+                const order = billOrders[0] || {};
                 const paymentStatus = String(
                   bill.payment_status || "unpaid",
                 ).toLowerCase();
@@ -1474,9 +1487,26 @@ function Orders() {
 
                     <div className="order-history-card-details">
                       <span>
-                        Order: {order.order_number || `#${bill.order_id}`}
+                        {billOrders.length > 1 ? "Orders: " : "Order: "}
+                        {billOrders.length > 0
+                          ? billOrders
+                              .map(
+                                (billOrder) =>
+                                  billOrder.order_number || `#${billOrder.id}`,
+                              )
+                              .join(", ")
+                          : `#${bill.order_id}`}
                       </span>
-                      <span>Customer: {order.customer_name || "Walk-in"}</span>
+                      <span>
+                        Customer:{" "}
+                        {[
+                          ...new Set(
+                            billOrders
+                              .map((billOrder) => billOrder.customer_name)
+                              .filter(Boolean),
+                          ),
+                        ].join(", ") || "Walk-in"}
+                      </span>
                       <span>
                         Method: {bill.payment_method || "Not recorded"}
                       </span>

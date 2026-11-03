@@ -59,7 +59,34 @@ export async function createBill(branchId, orderId, billData = {}) {
 
     return response.data;
 }
+/**
+ * Create one consolidated bill for all orders in a dining session.
+ *
+ * @param {string|number} branchId
+ * @param {string|number} diningSessionId
+ * @param {object} billData
+ */
+export async function createSessionBill(
+    branchId,
+    diningSessionId,
+    billData = {},
+) {
+    if (!branchId || !diningSessionId) {
+        throw new Error(
+            "Branch ID and dining session ID are required.",
+        );
+    }
 
+    const response = await api.post(
+        `/branches/${encodeURIComponent(branchId)}/bills/sessions/${encodeURIComponent(diningSessionId)}`,
+        {
+            discount_amount: billData.discount_amount ?? "0.00",
+            tax_rate: billData.tax_rate ?? "0.00",
+        },
+    );
+
+    return response.data;
+}
 /**
  * Mark a bill as paid using the selected payment method.
  */

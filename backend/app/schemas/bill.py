@@ -27,8 +27,6 @@ class BillOrderItemResponse(BaseModel):
     unit_price: Decimal
     line_total: Decimal
     special_instructions: str | None = None
-
-    # Cancellation information
     status: str = "pending"
     status_updated_at: datetime | None = None
 
@@ -47,7 +45,6 @@ class BillOrderResponse(BaseModel):
     total_amount: Decimal
     created_at: datetime
 
-    # Keep all items, including cancelled ones.
     items: list[BillOrderItemResponse] = Field(
         default_factory=list
     )
@@ -58,7 +55,13 @@ class BillResponse(BaseModel):
 
     id: int
     bill_number: str
+
+    # Primary order retained for backward compatibility.
     order_id: int
+
+    # New session-level billing reference.
+    dining_session_id: int | None = None
+
     branch_id: int
 
     subtotal: Decimal
@@ -66,7 +69,6 @@ class BillResponse(BaseModel):
     tax_amount: Decimal
     total_amount: Decimal
 
-    # Cancellation tracking
     cancelled_amount: Decimal = Decimal("0.00")
     cancelled_by: str | None = None
     cancelled_at: datetime | None = None
@@ -76,6 +78,13 @@ class BillResponse(BaseModel):
     paid_at: datetime | None = None
     created_at: datetime
 
-    order: BillOrderResponse
+    # Legacy single-order response.
+    order: BillOrderResponse | None = None
+
+    # New consolidated response.
+    orders: list[BillOrderResponse] = Field(
+        default_factory=list
+    )
+
     branch_name: str
     restaurant_name: str

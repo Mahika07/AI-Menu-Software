@@ -11,6 +11,7 @@ from app.core.dependencies import get_current_user
 from app.database.connection import get_db
 from app.models.bill import Bill
 from app.models.branch import Branch
+from app.models.dining_session import DiningSession
 from app.models.order import Order
 from app.models.restaurant import Restaurant
 from app.models.user import User
@@ -58,6 +59,9 @@ def get_owned_branch(
 def bill_query(db: Session):
     return db.query(Bill).options(
         selectinload(Bill.order).selectinload(Order.items),
+        selectinload(Bill.dining_session)
+        .selectinload(DiningSession.orders)
+        .selectinload(Order.items),
         joinedload(Bill.branch).joinedload(Branch.restaurant),
     )
 
@@ -66,10 +70,21 @@ def bill_payload(bill: Bill) -> dict:
     branch = bill.branch
     restaurant = branch.restaurant
 
+    if bill.dining_session is not None:
+        orders = sorted(
+            bill.dining_session.orders,
+            key=lambda order: (order.created_at, order.id),
+        )
+    elif bill.order is not None:
+        orders = [bill.order]
+    else:
+        orders = []
+
     return {
         "id": bill.id,
         "bill_number": bill.bill_number,
         "order_id": bill.order_id,
+        "dining_session_id": bill.dining_session_id,
         "branch_id": bill.branch_id,
         "subtotal": bill.subtotal,
         "discount_amount": bill.discount_amount,
@@ -83,6 +98,7 @@ def bill_payload(bill: Bill) -> dict:
         "paid_at": bill.paid_at,
         "created_at": bill.created_at,
         "order": bill.order,
+        "orders": orders,
         "branch_name": branch.name,
         "restaurant_name": restaurant.name,
     }
@@ -137,10 +153,18 @@ def list_bills_paginated(
     # Search bill number, order number, or customer name.
     if search and search.strip():
         term = f"%{search.strip()}%"
-        query = query.join(Order, Bill.order_id == Order.id).filter(
+        query = query.filter(
             (Bill.bill_number.ilike(term))
-            | (Order.order_number.ilike(term))
-            | (Order.customer_name.ilike(term))
+            | Bill.order.has(
+                (Order.order_number.ilike(term))
+                | (Order.customer_name.ilike(term))
+            )
+            | Bill.dining_session.has(
+                DiningSession.orders.any(
+                    (Order.order_number.ilike(term))
+                    | (Order.customer_name.ilike(term))
+                )
+            )
         )
 
     # Payment status.
@@ -376,6 +400,171 @@ def get_bill(
 
 
 @router.post(
+    "/sessions/{dining_session_id}",
+    response_model=BillResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_session_bill(
+    branch_id: int,
+    dining_session_id: int,
+    payload: BillCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    get_owned_branch(db, branch_id, current_user)
+
+    session = (
+        db.query(DiningSession)
+        .filter(DiningSession.id == dining_session_id)
+        .with_for_update()
+        .first()
+    )
+
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Dining session not found.",
+        )
+
+    orders = (
+        db.query(Order)
+        .options(selectinload(Order.items))
+        .filter(
+            Order.dining_session_id == session.id,
+            Order.branch_id == branch_id,
+        )
+        .order_by(Order.created_at, Order.id)
+        .with_for_update()
+        .all()
+    )
+
+    if not orders:
+        raise HTTPException(
+            status_code=404,
+            detail="No orders found for this dining session.",
+        )
+
+    unfinished_orders = [
+        order for order in orders
+        if (order.status or "").lower() not in {"completed", "cancelled"}
+    ]
+    if unfinished_orders:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Complete or cancel all orders in this dining session "
+                "before generating the bill."
+            ),
+        )
+
+    existing_bill = (
+        db.query(Bill)
+        .filter(
+            Bill.dining_session_id == session.id,
+            Bill.branch_id == branch_id,
+        )
+        .with_for_update()
+        .first()
+    )
+    if existing_bill:
+        raise HTTPException(
+            status_code=409,
+            detail="A bill already exists for this dining session.",
+        )
+
+    # The legacy order_id column is unique. Do not create a session bill
+    # if any order already has an older individual bill.
+    order_ids = [order.id for order in orders]
+    legacy_bill = (
+        db.query(Bill)
+        .filter(
+            Bill.branch_id == branch_id,
+            Bill.order_id.in_(order_ids),
+        )
+        .first()
+    )
+    if legacy_bill:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "An individual bill already exists for an order in this "
+                "session. Reconcile that bill before creating a session bill."
+            ),
+        )
+
+    active_items = []
+    cancelled_items = []
+    for order in orders:
+        for item in order.items:
+            if (item.status or "pending").lower() == "cancelled":
+                cancelled_items.append(item)
+            else:
+                active_items.append(item)
+
+    subtotal = money(
+        sum(
+            (Decimal(str(item.line_total or 0)) for item in active_items),
+            Decimal("0.00"),
+        )
+    )
+    cancelled_amount = money(
+        sum(
+            (Decimal(str(item.line_total or 0)) for item in cancelled_items),
+            Decimal("0.00"),
+        )
+    )
+    discount = money(payload.discount_amount)
+
+    if discount > subtotal:
+        raise HTTPException(
+            status_code=422,
+            detail="Discount cannot exceed the active-item subtotal.",
+        )
+
+    taxable_amount = subtotal - discount
+    tax = money(taxable_amount * payload.tax_rate / Decimal("100"))
+    total = money(taxable_amount + tax)
+
+    bill = Bill(
+        bill_number=f"BILL-{uuid.uuid4().hex[:12].upper()}",
+        order_id=orders[0].id,
+        dining_session_id=session.id,
+        branch_id=branch_id,
+        subtotal=subtotal,
+        discount_amount=discount,
+        tax_amount=tax,
+        total_amount=total,
+        cancelled_amount=cancelled_amount,
+        cancelled_by=None,
+        cancelled_at=(
+            datetime.now(timezone.utc) if cancelled_items else None
+        ),
+        payment_status="unpaid",
+    )
+
+    db.add(bill)
+    try:
+        db.commit()
+        db.refresh(bill)
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Unable to create bill. A bill may already exist "
+                "for this dining session."
+            ),
+        )
+
+    saved_bill = (
+        bill_query(db)
+        .filter(Bill.id == bill.id)
+        .first()
+    )
+    return bill_payload(saved_bill)
+
+
+@router.post(
     "/orders/{order_id}",
     response_model=BillResponse,
     status_code=status.HTTP_201_CREATED,
@@ -404,6 +593,15 @@ def create_bill(
         raise HTTPException(
             status_code=404,
             detail="Order not found.",
+        )
+
+    if order.dining_session_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This order belongs to a dining session. "
+                "Generate the bill for the entire dining session instead."
+            ),
         )
 
     existing_bill = (

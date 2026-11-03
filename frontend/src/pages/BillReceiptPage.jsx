@@ -91,6 +91,7 @@ function BillReceiptPage() {
     return (
       <div className="page">
         <p>No bill selected.</p>
+
         <button
           type="button"
           className="secondary-button"
@@ -103,11 +104,21 @@ function BillReceiptPage() {
     );
   }
 
-  const order = bill.order || location.state?.order;
+  // Supports both consolidated bills and older single-order bills.
+  const receiptOrders =
+    Array.isArray(bill.orders) && bill.orders.length > 0
+      ? bill.orders
+      : bill.order
+        ? [bill.order]
+        : location.state?.order
+          ? [location.state.order]
+          : [];
+
   const restaurant = {
     name:
       bill.restaurant_name || location.state?.restaurant?.name || "Restaurant",
   };
+
   const branch = {
     name: bill.branch_name || location.state?.branch?.name || "",
     address: location.state?.branch?.address || "",
@@ -118,7 +129,12 @@ function BillReceiptPage() {
     <div className="page bill-receipt-page">
       <div className="page-header">
         <div>
-          <h1>Bill Receipt</h1>
+          <h1>
+            {receiptOrders.length > 1
+              ? "Consolidated Bill Receipt"
+              : "Bill Receipt"}
+          </h1>
+
           <p>{bill.bill_number}</p>
         </div>
 
@@ -160,12 +176,20 @@ function BillReceiptPage() {
         </div>
       )}
 
-      <BillReceipt
-        bill={bill}
-        order={order}
-        restaurant={restaurant}
-        branch={branch}
-      />
+      {receiptOrders.length === 0 ? (
+        <div className="error-message" role="alert">
+          <AlertCircle size={18} />
+          This bill does not contain any order details. Please refresh or return
+          to the Bills page.
+        </div>
+      ) : (
+        <BillReceipt
+          bill={bill}
+          order={receiptOrders[0]}
+          restaurant={restaurant}
+          branch={branch}
+        />
+      )}
     </div>
   );
 }
