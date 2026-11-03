@@ -1162,3 +1162,15 @@
     flex: 1;
   }
 }
+
+.global-selector-field select {
+  width: 40%;
+}
+
+.global-selector-field span {
+  padding: 0px 15px 0px 5px;
+}
+
+.branch {
+  margin: 0px 10px;
+}
