@@ -793,242 +793,337 @@ function Orders() {
             </div>
           ) : (
             <div className="orders-grid">
-              {visibleOrders.map((order) => {
-                const nextAction = NEXT_ACTIONS[order.status];
-                const updating = updatingOrderId === order.id;
-                const existingBill = getBillForOrder(order);
-                const billCheckPending = loadingBills && !existingBill;
-                const sessionOrders =
-                  order.dining_session_id != null
-                    ? getOrdersForSession(order.dining_session_id)
-                    : [order];
-                const visibleSessionOrders =
-                  order.dining_session_id != null
-                    ? visibleOrders.filter(
-                        (sessionOrder) =>
-                          String(sessionOrder.dining_session_id) ===
-                          String(order.dining_session_id),
-                      )
-                    : [order];
-                const isSessionBillingCard =
-                  order.dining_session_id == null ||
-                  visibleSessionOrders.length === 0 ||
-                  String(order.id) === String(visibleSessionOrders[0].id);
-                const sessionCanBeBilled = sessionOrders.every((sessionOrder) =>
-                  ["completed", "cancelled"].includes(
-                    String(sessionOrder.status || "").toLowerCase(),
-                  ),
-                );
+              {(() => {
+                // Render one card per dining session. Takeaway/legacy orders
+                // without a session remain individual cards.
+                const groups = [];
+                const sessionIndexes = new Map();
 
-                return (
-                  <article
-                    className="owner-order-card"
-                    key={order.id ?? order.order_number}
-                  >
-                    <header className="owner-order-header">
-                      <div>
-                        <span className="owner-order-number">
-                          Order #
-                          {String(order.order_number || order.id).slice(0, 8)}
-                        </span>
+                visibleOrders.forEach((order) => {
+                  if (order.dining_session_id == null) {
+                    groups.push({
+                      key: `order-${order.id ?? order.order_number}`,
+                      sessionId: null,
+                      orders: [order],
+                    });
+                    return;
+                  }
 
-                        <h2>
-                          {order.table_number
-                            ? `Table ${order.table_number}`
-                            : "Takeaway / No table"}
-                        </h2>
+                  const sessionKey = String(order.dining_session_id);
+                  if (sessionIndexes.has(sessionKey)) {
+                    groups[sessionIndexes.get(sessionKey)].orders.push(order);
+                  } else {
+                    sessionIndexes.set(sessionKey, groups.length);
+                    groups.push({
+                      key: `session-${sessionKey}`,
+                      sessionId: order.dining_session_id,
+                      orders: [order],
+                    });
+                  }
+                });
 
-                        <span className="owner-order-time">
-                          <Clock size={14} />
-                          {formatDate(order.created_at)}
-                        </span>
-                        {order.dining_session_id != null && (
-                          <span className="owner-order-time">
-                            Dining session #{order.dining_session_id}
+                return groups.map((group) => {
+                  const groupOrders = group.orders;
+                  const firstOrder = groupOrders[0];
+                  const existingBill = getBillForOrder(firstOrder);
+                  const allSessionOrders =
+                    group.sessionId != null
+                      ? getOrdersForSession(group.sessionId)
+                      : groupOrders;
+                  const sessionCanBeBilled = allSessionOrders.every((entry) =>
+                    ["completed", "cancelled"].includes(
+                      String(entry.status || "").toLowerCase(),
+                    ),
+                  );
+                  const activeTotal = groupOrders.reduce(
+                    (sum, entry) =>
+                      sum +
+                      (entry.items || []).reduce(
+                        (itemSum, item) =>
+                          itemSum +
+                          (String(item.status || "pending").toLowerCase() ===
+                          "cancelled"
+                            ? 0
+                            : Number(item.line_total || 0)),
+                        0,
+                      ),
+                    0,
+                  );
+                  const cancelledTotal = groupOrders.reduce(
+                    (sum, entry) =>
+                      sum +
+                      (entry.items || []).reduce(
+                        (itemSum, item) =>
+                          itemSum +
+                          (String(item.status || "pending").toLowerCase() ===
+                          "cancelled"
+                            ? Number(item.line_total || 0)
+                            : 0),
+                        0,
+                      ),
+                    0,
+                  );
+
+                  return (
+                    <article
+                      className="owner-order-card owner-session-card"
+                      key={group.key}
+                    >
+                      <header className="owner-order-header">
+                        <div>
+                          <span className="owner-order-number">
+                            {group.sessionId != null
+                              ? `Dining session #${group.sessionId}`
+                              : `Order #${String(firstOrder.order_number || firstOrder.id).slice(0, 8)}`}
                           </span>
-                        )}
-                      </div>
-
-                      <span
-                        className={`order-status-badge status-${order.status}`}
-                      >
-                        {STATUS_LABELS[order.status] || order.status}
-                      </span>
-                    </header>
-
-                    {order.customer_name && (
-                      <p className="owner-order-customer">
-                        Customer: <strong>{order.customer_name}</strong>
-                      </p>
-                    )}
-
-                    {order.customer_note && (
-                      <div className="owner-order-note">
-                        <strong>Customer note</strong>
-                        <p>{order.customer_note}</p>
-                      </div>
-                    )}
-
-                    <div className="owner-order-items">
-                      {(order.items || []).map((item, index) => (
-                        <div
-                          className={`owner-order-item ${
-                            item.status === "cancelled" ? "is-cancelled" : ""
-                          }`}
-                          style={
-                            item.status === "cancelled"
-                              ? {
-                                  opacity: 0.65,
-                                  textDecoration: "line-through",
-                                }
-                              : undefined
-                          }
-                          key={item.id ?? `${item.dish_name}-${index}`}
-                        >
-                          <div>
-                            <strong>
-                              {item.quantity} × {item.dish_name}
-                            </strong>
-
-                            {item.special_instructions && (
-                              <p>{item.special_instructions}</p>
-                            )}
-
-                            {item.status === "cancelled" && (
-                              <small
-                                className="cancelled-item-label"
-                                style={{
-                                  display: "block",
-                                  color: "#b42318",
-                                  fontWeight: 700,
-                                  textDecoration: "none",
-                                }}
-                              >
-                                Cancelled · Not charged
-                              </small>
-                            )}
-                          </div>
-
-                          <span>{formatMoney(item.line_total)}</span>
+                          <h2>
+                            {firstOrder.table_number
+                              ? `Table ${firstOrder.table_number}`
+                              : "Takeaway / No table"}
+                          </h2>
+                          <span className="owner-order-time">
+                            <Clock size={14} />
+                            {formatDate(firstOrder.created_at)}
+                            {groupOrders.length > 1
+                              ? ` · ${groupOrders.length} orders`
+                              : ""}
+                          </span>
                         </div>
-                      ))}
-                    </div>
+                        <span className="order-status-badge status-completed">
+                          {groupOrders.every(
+                            (entry) => entry.status === "completed",
+                          )
+                            ? "Completed"
+                            : groupOrders.every(
+                                  (entry) => entry.status === "cancelled",
+                                )
+                              ? "Cancelled"
+                              : "In progress"}
+                        </span>
+                      </header>
 
-                    <div className="owner-order-total">
-                      <span>Total</span>
-                      <strong>{formatMoney(order.total_amount)}</strong>
-                    </div>
+                      {groupOrders.map((order) => {
+                        const nextAction = NEXT_ACTIONS[order.status];
+                        const updating = updatingOrderId === order.id;
 
-                    {existingBill && (
-                      <div className="owner-order-note">
-                        <strong>Bill generated</strong>
-                        <p>
-                          {existingBill.bill_number} ·{" "}
-                          {formatMoney(existingBill.total_amount)} ·{" "}
-                          {existingBill.payment_status || "unpaid"}
-                        </p>
+                        return (
+                          <section
+                            className="owner-session-order"
+                            key={order.id ?? order.order_number}
+                          >
+                            <div className="owner-session-order-heading">
+                              <div>
+                                <span className="owner-order-number">
+                                  Order #
+                                  {String(order.order_number || order.id).slice(
+                                    0,
+                                    8,
+                                  )}
+                                </span>
+                                <span
+                                  className={`order-status-badge status-${order.status}`}
+                                >
+                                  {STATUS_LABELS[order.status] || order.status}
+                                </span>
+                              </div>
+                              {order.customer_name && (
+                                <p className="owner-order-customer">
+                                  Customer:{" "}
+                                  <strong>{order.customer_name}</strong>
+                                </p>
+                              )}
+                            </div>
+
+                            {order.customer_note && (
+                              <div className="owner-order-note">
+                                <strong>Customer note</strong>
+                                <p>{order.customer_note}</p>
+                              </div>
+                            )}
+
+                            <div className="owner-order-items">
+                              {(order.items || []).map((item, index) => {
+                                const cancelled =
+                                  String(
+                                    item.status || "pending",
+                                  ).toLowerCase() === "cancelled";
+                                return (
+                                  <div
+                                    className={`owner-order-item ${cancelled ? "is-cancelled" : ""}`}
+                                    key={
+                                      item.id ?? `${item.dish_name}-${index}`
+                                    }
+                                    style={
+                                      cancelled ? { opacity: 0.65 } : undefined
+                                    }
+                                  >
+                                    <div>
+                                      <strong
+                                        style={
+                                          cancelled
+                                            ? { textDecoration: "line-through" }
+                                            : undefined
+                                        }
+                                      >
+                                        {item.quantity} × {item.dish_name}
+                                      </strong>
+                                      {item.special_instructions && (
+                                        <p>{item.special_instructions}</p>
+                                      )}
+                                      {cancelled && (
+                                        <small
+                                          className="cancelled-item-label"
+                                          style={{
+                                            display: "block",
+                                            color: "#b42318",
+                                            fontWeight: 700,
+                                          }}
+                                        >
+                                          Cancelled · Not charged
+                                        </small>
+                                      )}
+                                    </div>
+                                    <span
+                                      style={
+                                        cancelled
+                                          ? { textDecoration: "line-through" }
+                                          : undefined
+                                      }
+                                    >
+                                      {formatMoney(item.line_total)}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            <div className="owner-order-total">
+                              <span>Order total</span>
+                              <strong>
+                                {formatMoney(
+                                  (order.items || []).reduce(
+                                    (sum, item) =>
+                                      sum +
+                                      (String(
+                                        item.status || "pending",
+                                      ).toLowerCase() === "cancelled"
+                                        ? 0
+                                        : Number(item.line_total || 0)),
+                                    0,
+                                  ),
+                                )}
+                              </strong>
+                            </div>
+
+                            <footer className="owner-order-actions">
+                              <button
+                                type="button"
+                                className="secondary-button"
+                                onClick={() =>
+                                  printOrderReceipt(
+                                    order,
+                                    selectedRestaurant,
+                                    selectedBranch,
+                                  )
+                                }
+                              >
+                                <Printer size={16} />
+                                Print order
+                              </button>
+
+                              {nextAction && (
+                                <button
+                                  type="button"
+                                  className="primary-button"
+                                  disabled={
+                                    updating || updatingOrderId !== null
+                                  }
+                                  onClick={() =>
+                                    handleStatusChange(order, nextAction.status)
+                                  }
+                                >
+                                  {updating ? "Updating..." : nextAction.label}
+                                </button>
+                              )}
+
+                              {["pending", "confirmed", "preparing"].includes(
+                                order.status,
+                              ) && (
+                                <button
+                                  type="button"
+                                  className="danger-button"
+                                  disabled={
+                                    updating || updatingOrderId !== null
+                                  }
+                                  onClick={() =>
+                                    handleStatusChange(order, "cancelled")
+                                  }
+                                >
+                                  Cancel
+                                </button>
+                              )}
+                            </footer>
+                          </section>
+                        );
+                      })}
+
+                      <div className="owner-order-total owner-session-total">
+                        <span>
+                          Session total
+                          {cancelledTotal > 0
+                            ? ` · ${formatMoney(cancelledTotal)} cancelled`
+                            : ""}
+                        </span>
+                        <strong>{formatMoney(activeTotal)}</strong>
                       </div>
-                    )}
 
-                    <footer className="owner-order-actions">
-                      {isSessionBillingCard && existingBill && (
-                        <button
-                          type="button"
-                          className="primary-button"
-                          onClick={() => handleViewBill(existingBill, order)}
-                        >
-                          <ExternalLink size={16} />
-                          View{" "}
-                          {existingBill.dining_session_id ? "Session " : ""}Bill
-                        </button>
+                      {existingBill && (
+                        <div className="owner-order-note">
+                          <strong>Bill generated</strong>
+                          <p>
+                            {existingBill.bill_number} ·{" "}
+                            {formatMoney(existingBill.total_amount)} ·{" "}
+                            {existingBill.payment_status || "unpaid"}
+                          </p>
+                        </div>
                       )}
 
-                      {isSessionBillingCard &&
-                        !existingBill &&
-                        (order.dining_session_id != null
-                          ? sessionCanBeBilled
-                          : order.status === "completed") && (
+                      <footer className="owner-order-actions owner-session-actions">
+                        {existingBill ? (
                           <button
                             type="button"
                             className="primary-button"
-                            onClick={() => handleGenerateBill(order)}
-                            disabled={
-                              updatingOrderId !== null ||
-                              loadingBills ||
-                              billCheckPending
+                            onClick={() =>
+                              handleViewBill(existingBill, firstOrder)
                             }
                           >
-                            <ReceiptText size={16} />
-                            {loadingBills
-                              ? "Checking bill..."
-                              : order.dining_session_id != null
+                            <ExternalLink size={16} />
+                            View Session Bill
+                          </button>
+                        ) : (
+                          (group.sessionId == null
+                            ? firstOrder.status === "completed"
+                            : sessionCanBeBilled) && (
+                            <button
+                              type="button"
+                              className="primary-button"
+                              onClick={() => handleGenerateBill(firstOrder)}
+                              disabled={
+                                updatingOrderId !== null || loadingBills
+                              }
+                            >
+                              <ReceiptText size={16} />
+                              {group.sessionId != null
                                 ? "Generate Session Bill"
                                 : "Generate Bill"}
-                          </button>
-                        )}
-
-                      <button
-                        type="button"
-                        className="secondary-button"
-                        onClick={() =>
-                          printOrderReceipt(
-                            order,
-                            selectedRestaurant,
-                            selectedBranch,
+                            </button>
                           )
-                        }
-                      >
-                        <Printer size={16} />
-                        Print receipt
-                      </button>
-
-                      {nextAction && (
-                        <button
-                          type="button"
-                          className="primary-button"
-                          disabled={updating || updatingOrderId !== null}
-                          onClick={() =>
-                            handleStatusChange(order, nextAction.status)
-                          }
-                        >
-                          {updating ? (
-                            "Updating..."
-                          ) : (
-                            <>
-                              {order.status === "pending" && (
-                                <CheckCircle2 size={16} />
-                              )}
-
-                              {order.status === "confirmed" && (
-                                <ChefHat size={16} />
-                              )}
-
-                              {order.status === "preparing" && (
-                                <Utensils size={16} />
-                              )}
-
-                              {nextAction.label}
-                            </>
-                          )}
-                        </button>
-                      )}
-
-                      {["pending", "confirmed", "preparing"].includes(
-                        order.status,
-                      ) && (
-                        <button
-                          type="button"
-                          className="danger-button"
-                          disabled={updating || updatingOrderId !== null}
-                          onClick={() => handleStatusChange(order, "cancelled")}
-                        >
-                          Cancel
-                        </button>
-                      )}
-                    </footer>
-                  </article>
-                );
-              })}
+                        )}
+                      </footer>
+                    </article>
+                  );
+                });
+              })()}
             </div>
           )}
 
