@@ -794,60 +794,51 @@ function Orders() {
           ) : (
             <div className="orders-grid">
               {(() => {
-                // Group all loaded orders by dining session before applying
-                // the status filter, so one session always renders as one card.
-                const groupsByKey = new Map();
+                // One dashboard card per dining session. Orders without a
+                // session remain separate cards for backward compatibility.
+                const groups = [];
+                const sessionIndexes = new Map();
 
-                orders.forEach((order) => {
-                  const key =
-                    order.dining_session_id != null
-                      ? `session-${String(order.dining_session_id)}`
-                      : `order-${order.id ?? order.order_number}`;
-
-                  if (!groupsByKey.has(key)) {
-                    groupsByKey.set(key, {
-                      key,
-                      sessionId: order.dining_session_id ?? null,
-                      orders: [],
+                visibleOrders.forEach((order) => {
+                  if (order.dining_session_id == null) {
+                    groups.push({
+                      key: `order-${order.id ?? order.order_number}`,
+                      sessionId: null,
+                      orders: [order],
                     });
+                    return;
                   }
 
-                  groupsByKey.get(key).orders.push(order);
+                  const sessionKey = String(order.dining_session_id);
+                  if (sessionIndexes.has(sessionKey)) {
+                    groups[sessionIndexes.get(sessionKey)].orders.push(order);
+                  } else {
+                    sessionIndexes.set(sessionKey, groups.length);
+                    groups.push({
+                      key: `session-${sessionKey}`,
+                      sessionId: order.dining_session_id,
+                      orders: [order],
+                    });
+                  }
                 });
-
-                const groups = Array.from(groupsByKey.values())
-                  .map((group) => ({
-                    ...group,
-                    orders: [...group.orders].sort(
-                      (a, b) =>
-                        new Date(a.created_at || 0) -
-                        new Date(b.created_at || 0),
-                    ),
-                  }))
-                  .filter(
-                    (group) =>
-                      !statusFilter ||
-                      group.orders.some(
-                        (order) => order.status === statusFilter,
-                      ),
-                  )
-                  .sort(
-                    (a, b) =>
-                      new Date(b.orders[b.orders.length - 1]?.created_at || 0) -
-                      new Date(a.orders[a.orders.length - 1]?.created_at || 0),
-                  );
 
                 return groups.map((group) => {
                   const groupOrders = group.orders;
                   const firstOrder = groupOrders[0];
-                  const latestOrder = groupOrders[groupOrders.length - 1];
-                  const existingBill =
-                    groupOrders.map(getBillForOrder).find(Boolean) || null;
-                  const allOrdersReady = groupOrders.every((entry) =>
-                    ["completed", "cancelled"].includes(
-                      String(entry.status || "").toLowerCase(),
-                    ),
-                  );
+                  const existingBill = groupOrders
+                    .map((entry) => getBillForOrder(entry))
+                    .find(Boolean);
+                  const allSessionOrders =
+                    group.sessionId != null
+                      ? getOrdersForSession(group.sessionId)
+                      : groupOrders;
+                  const sessionCanBeBilled =
+                    allSessionOrders.length > 0 &&
+                    allSessionOrders.every((entry) =>
+                      ["completed", "cancelled"].includes(
+                        String(entry.status || "").toLowerCase(),
+                      ),
+                    );
 
                   const activeTotal = groupOrders.reduce(
                     (sum, entry) =>
@@ -896,8 +887,8 @@ function Orders() {
                         <div>
                           <span className="owner-order-number">
                             {group.sessionId != null
-                              ? `DINING SESSION #${group.sessionId}`
-                              : `ORDER #${String(firstOrder.order_number || firstOrder.id).slice(0, 8)}`}
+                              ? `Dining session #${group.sessionId}`
+                              : `Order #${String(firstOrder.order_number || firstOrder.id).slice(0, 8)}`}
                           </span>
                           <h2>
                             {firstOrder.table_number
@@ -915,9 +906,7 @@ function Orders() {
                         <span
                           className={`order-status-badge status-${groupStatus}`}
                         >
-                          {groupStatus === "preparing"
-                            ? "In progress"
-                            : STATUS_LABELS[groupStatus]}
+                          {STATUS_LABELS[groupStatus] || "In progress"}
                         </span>
                       </header>
 
@@ -966,12 +955,14 @@ function Orders() {
                                   String(
                                     item.status || "pending",
                                   ).toLowerCase() === "cancelled";
-
                                 return (
                                   <div
                                     className={`owner-order-item ${cancelled ? "is-cancelled" : ""}`}
                                     key={
                                       item.id ?? `${item.dish_name}-${index}`
+                                    }
+                                    style={
+                                      cancelled ? { opacity: 0.65 } : undefined
                                     }
                                   >
                                     <div>
@@ -1117,19 +1108,25 @@ function Orders() {
                             <ExternalLink size={16} />
                             View Session Bill
                           </button>
-                        ) : allOrdersReady ? (
-                          <button
-                            type="button"
-                            className="primary-button"
-                            onClick={() => handleGenerateBill(latestOrder)}
-                            disabled={updatingOrderId !== null || loadingBills}
-                          >
-                            <ReceiptText size={16} />
-                            {group.sessionId != null
-                              ? "Generate Session Bill"
-                              : "Generate Bill"}
-                          </button>
-                        ) : null}
+                        ) : (
+                          (group.sessionId == null
+                            ? firstOrder.status === "completed"
+                            : sessionCanBeBilled) && (
+                            <button
+                              type="button"
+                              className="primary-button"
+                              onClick={() => handleGenerateBill(firstOrder)}
+                              disabled={
+                                updatingOrderId !== null || loadingBills
+                              }
+                            >
+                              <ReceiptText size={16} />
+                              {group.sessionId != null
+                                ? "Generate Session Bill"
+                                : "Generate Bill"}
+                            </button>
+                          )
+                        )}
                       </footer>
                     </article>
                   );
