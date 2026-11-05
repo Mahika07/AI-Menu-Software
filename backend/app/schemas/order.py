@@ -111,6 +111,7 @@ class OrderCreate(BaseModel):
 
         return items
 
+
 class OrderStatusUpdate(BaseModel):
     status: OrderStatus
 
@@ -137,6 +138,10 @@ class OrderResponse(BaseModel):
     order_number: str
     branch_id: int
     table_number: str
+
+    # Added for consolidated dining-session billing.
+    dining_session_id: int | None = None
+
     status: OrderStatus
     customer_id: int | None = None
     customer_name: str | None

@@ -475,38 +475,38 @@ def update_order_status(
             ),
         )
 
-    now = utc_now()
-
-    if payload.status == "preparing":
-        for item in order.items:
-            if item.status == "pending":
-                set_item_status(item, "preparing", now)
-
-    elif payload.status == "ready":
-        for item in order.items:
-            if item.status in {"pending", "preparing"}:
-                set_item_status(item, "ready", now)
-
-    elif payload.status == "completed":
-        for item in order.items:
-            if item.status == "ready":
-                set_item_status(item, "served", now)
-
-    elif payload.status == "cancelled":
-        for item in order.items:
-            if item.status in {
-                "pending",
-                "preparing",
-                "ready",
-            }:
-                set_item_status(item, "cancelled", now)
-
-    recalculate_order_status(order)
-
-    if payload.status == "cancelled":
-        recalculate_bill_for_order(db, order, cancelled_by="owner")
-
     try:
+        now = utc_now()
+
+        if payload.status == "preparing":
+            for item in order.items:
+                if item.status == "pending":
+                    set_item_status(item, "preparing", now)
+
+        elif payload.status == "ready":
+            for item in order.items:
+                if item.status in {"pending", "preparing"}:
+                    set_item_status(item, "ready", now)
+
+        elif payload.status == "completed":
+            for item in order.items:
+                if item.status == "ready":
+                    set_item_status(item, "served", now)
+
+        elif payload.status == "cancelled":
+            for item in order.items:
+                if item.status in {
+                    "pending",
+                    "preparing",
+                    "ready",
+                }:
+                    set_item_status(item, "cancelled", now)
+
+        recalculate_order_status(order)
+
+        if payload.status == "cancelled":
+            recalculate_bill_for_order(db, order, cancelled_by="owner")
+
         db.commit()
     except Exception:
         db.rollback()
@@ -584,20 +584,20 @@ def update_order_item_status(
             ),
         )
 
-    now = utc_now()
-
-    set_item_status(
-        item,
-        payload.status,
-        now,
-    )
-
-    recalculate_order_status(order)
-
-    if payload.status == "cancelled":
-        recalculate_bill_for_order(db, order, cancelled_by="owner")
-
     try:
+        now = utc_now()
+
+        set_item_status(
+            item,
+            payload.status,
+            now,
+        )
+
+        recalculate_order_status(order)
+
+        if payload.status == "cancelled":
+            recalculate_bill_for_order(db, order, cancelled_by="owner")
+
         db.commit()
     except Exception:
         db.rollback()
