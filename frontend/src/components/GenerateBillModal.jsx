@@ -1,27 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
-import { X, Receipt } from "lucide-react";
+import { X, Receipt, ShoppingBag } from "lucide-react";
 import { createBill, createSessionBill } from "../api/bills";
 import "./GenerateBillModal.css";
 
-function money(value) {
-  return new Intl.NumberFormat("en-IN", {
+const money = (value) =>
+  new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(Number(value || 0));
-}
 
-function roundMoney(value) {
-  return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
-}
+const roundMoney = (value) =>
+  Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 
-function getItemTotal(item) {
-  if (item.line_total != null) {
-    return Number(item.line_total);
-  }
+const isCancelled = (item) =>
+  String(item.status || "pending").toLowerCase() === "cancelled";
 
-  return Number(item.unit_price || 0) * Number(item.quantity || 0);
-}
+const getItemTotal = (item) =>
+  item.line_total != null
+    ? Number(item.line_total)
+    : Number(item.unit_price || 0) * Number(item.quantity || 0);
 
 export default function GenerateBillModal({
   order,
@@ -37,54 +36,49 @@ export default function GenerateBillModal({
   const [error, setError] = useState("");
 
   const orders = useMemo(() => {
-    if (Array.isArray(ordersProp) && ordersProp.length > 0) {
-      return ordersProp;
-    }
-
+    if (Array.isArray(ordersProp) && ordersProp.length) return ordersProp;
     return order ? [order] : [];
   }, [ordersProp, order]);
 
   const isSessionBill = Boolean(diningSessionId);
 
   useEffect(() => {
-    function onKeyDown(event) {
-      if (event.key === "Escape" && !saving) {
-        onClose();
-      }
-    }
-
+    const onKeyDown = (event) => {
+      if (event.key === "Escape" && !saving) onClose?.();
+    };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose, saving]);
 
-  const { subtotal, cancelledAmount, itemCount } = useMemo(() => {
-    let activeTotal = 0;
-    let cancelledTotal = 0;
+  // Cancelled items are removed from the bill view and all bill calculations.
+  const billOrders = useMemo(
+    () =>
+      orders
+        .map((currentOrder, index) => ({
+          ...currentOrder,
+          displayLabel: `Order ${index + 1}`,
+          billItems: (currentOrder.items || []).filter(
+            (item) => !isCancelled(item),
+          ),
+        }))
+        .filter((currentOrder) => currentOrder.billItems.length > 0),
+    [orders],
+  );
+
+  const { subtotal, itemCount } = useMemo(() => {
+    let amount = 0;
     let quantity = 0;
-
-    orders.forEach((currentOrder) => {
-      (currentOrder.items || []).forEach((item) => {
-        const itemQuantity = Number(item.quantity || 0);
-        quantity += itemQuantity;
-
-        if ((item.status || "pending").toLowerCase() === "cancelled") {
-          cancelledTotal += getItemTotal(item);
-        } else {
-          activeTotal += getItemTotal(item);
-        }
+    billOrders.forEach((currentOrder) => {
+      currentOrder.billItems.forEach((item) => {
+        amount += getItemTotal(item);
+        quantity += Number(item.quantity || 0);
       });
     });
+    return { subtotal: roundMoney(amount), itemCount: quantity };
+  }, [billOrders]);
 
-    return {
-      subtotal: roundMoney(activeTotal),
-      cancelledAmount: roundMoney(cancelledTotal),
-      itemCount: quantity,
-    };
-  }, [orders]);
-
-  const discountAmount = Number(discount);
-  const rate = Number(taxRate);
-
+  const discountAmount = discount.trim() === "" ? NaN : Number(discount);
+  const rate = taxRate.trim() === "" ? NaN : Number(taxRate);
   const valid =
     Number.isFinite(discountAmount) &&
     Number.isFinite(rate) &&
@@ -94,19 +88,15 @@ export default function GenerateBillModal({
     rate <= 100;
 
   const taxable = Math.max(0, subtotal - (valid ? discountAmount : 0));
-
   const tax = valid ? roundMoney((taxable * rate) / 100) : 0;
-
   const total = roundMoney(taxable + tax);
 
   async function handleSubmit(event) {
     event.preventDefault();
-
-    if (!valid || saving || !branchId || orders.length === 0) {
+    if (!valid || saving || !branchId || orders.length === 0 || itemCount === 0)
       return;
-    }
 
-    if (isSessionBill && !orders.some((item) => item.id)) {
+    if (isSessionBill && !orders.some((currentOrder) => currentOrder.id)) {
       setError("No valid orders found in this dining session.");
       return;
     }
@@ -114,20 +104,13 @@ export default function GenerateBillModal({
     try {
       setSaving(true);
       setError("");
-
       const payload = {
         discount_amount: discountAmount.toFixed(2),
         tax_rate: rate.toFixed(2),
       };
-
-      let bill;
-
-      if (isSessionBill) {
-        bill = await createSessionBill(branchId, diningSessionId, payload);
-      } else {
-        bill = await createBill(branchId, orders[0].id, payload);
-      }
-
+      const bill = isSessionBill
+        ? await createSessionBill(branchId, diningSessionId, payload)
+        : await createBill(branchId, orders[0].id, payload);
       onGenerated?.(bill);
     } catch (err) {
       setError(
@@ -143,9 +126,7 @@ export default function GenerateBillModal({
     <div
       className="generate-bill-overlay"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !saving) {
-          onClose();
-        }
+        if (event.target === event.currentTarget && !saving) onClose?.();
       }}
     >
       <section
@@ -155,163 +136,172 @@ export default function GenerateBillModal({
         aria-labelledby="generate-bill-title"
       >
         <header className="generate-bill-header">
-          <div>
+          <div className="generate-bill-heading">
             <span className="generate-bill-icon">
-              <Receipt size={21} />
+              <Receipt size={22} />
             </span>
-
             <div>
               <h2 id="generate-bill-title">
-                Generate {isSessionBill ? "consolidated " : ""}bill
+                {isSessionBill ? "Consolidated bill" : "Generate bill"}
               </h2>
-
               <p>
                 {isSessionBill
                   ? `Dining session #${diningSessionId}`
-                  : `Order ${
-                      orders[0]?.order_number || `#${orders[0]?.id || ""}`
-                    }`}
+                  : orders[0]?.order_number || `Order #${orders[0]?.id || ""}`}
               </p>
             </div>
           </div>
-
           <button
             type="button"
             className="generate-bill-close"
             onClick={onClose}
             disabled={saving}
-            aria-label="Close"
+            aria-label="Close bill"
           >
             <X size={20} />
           </button>
         </header>
 
-        <form onSubmit={handleSubmit}>
-          <div className="generate-bill-order">
-            <span>Table</span>
-            <strong>{orders[0]?.table_number || "—"}</strong>
-
-            <span>Orders</span>
-            <strong>{orders.length}</strong>
-
-            <span>Items</span>
-            <strong>{itemCount}</strong>
+        <form className="generate-bill-form" onSubmit={handleSubmit}>
+          <div className="generate-bill-stats">
+            <div>
+              <span>Table</span>
+              <strong>{orders[0]?.table_number || "—"}</strong>
+            </div>
+            <div>
+              <span>Orders</span>
+              <strong>{orders.length}</strong>
+            </div>
+            <div>
+              <span>Items</span>
+              <strong>{itemCount}</strong>
+            </div>
           </div>
 
-          <div className="generate-bill-order-list">
-            <h3>Order summary</h3>
-
-            {orders.map((currentOrder) => (
-              <div className="generate-bill-order-entry" key={currentOrder.id}>
-                <div className="generate-bill-order-heading">
-                  <strong>
-                    {currentOrder.order_number || `Order #${currentOrder.id}`}
-                  </strong>
-
-                  <span>
-                    {money(
-                      (currentOrder.items || []).reduce(
-                        (sum, item) =>
-                          sum +
-                          ((item.status || "pending").toLowerCase() ===
-                          "cancelled"
-                            ? 0
-                            : getItemTotal(item)),
-                        0,
-                      ),
-                    )}
-                  </span>
-                </div>
-
-                {(currentOrder.items || []).map((item) => (
-                  <div className="generate-bill-item" key={item.id}>
-                    <span>
-                      {item.dish_name || item.name || "Item"} × {item.quantity}
-                      {(item.status || "").toLowerCase() === "cancelled" && (
-                        <small> (Cancelled)</small>
-                      )}
-                    </span>
-
-                    <span>{money(getItemTotal(item))}</span>
-                  </div>
-                ))}
+          <section className="generate-bill-section">
+            <div className="generate-bill-section-title">
+              <div>
+                <h3>Bill items</h3>
+                <p>Only active items are included in this bill.</p>
               </div>
-            ))}
-          </div>
+              <span className="generate-bill-item-count">
+                <ShoppingBag size={15} /> {itemCount} items
+              </span>
+            </div>
 
-          <label className="generate-bill-field">
-            <span>Discount (₹)</span>
+            {billOrders.length === 0 ? (
+              <div className="generate-bill-empty">
+                No active items are available to bill.
+              </div>
+            ) : (
+              billOrders.map((currentOrder) => (
+                <div
+                  className="generate-bill-order-entry"
+                  key={currentOrder.id}
+                >
+                  {orders.length > 1 && (
+                    <div className="generate-bill-order-heading">
+                      {currentOrder.displayLabel}
+                    </div>
+                  )}
+                  {currentOrder.billItems.map((item, index) => (
+                    <div
+                      className="generate-bill-item"
+                      key={item.id ?? `${currentOrder.id}-${index}`}
+                    >
+                      <div className="generate-bill-item-info">
+                        <strong>
+                          {item.dish_name || item.name || "Menu item"}
+                        </strong>
+                        <span>
+                          {item.quantity} × {money(item.unit_price)}
+                        </span>
+                      </div>
+                      <strong className="generate-bill-item-price">
+                        {money(getItemTotal(item))}
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+              ))
+            )}
+          </section>
 
-            <input
-              type="number"
-              min="0"
-              max={subtotal}
-              step="0.01"
-              value={discount}
-              onChange={(event) => setDiscount(event.target.value)}
-              required
-            />
-          </label>
+          <section className="generate-bill-adjustments">
+            <label className="generate-bill-field">
+              <span>
+                Discount <small>(₹)</small>
+              </span>
+              <input
+                type="number"
+                min="0"
+                max={subtotal}
+                step="0.01"
+                value={discount}
+                onChange={(event) => setDiscount(event.target.value)}
+                required
+              />
+            </label>
+            <label className="generate-bill-field">
+              <span>
+                Tax rate <small>(%)</small>
+              </span>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={taxRate}
+                onChange={(event) => setTaxRate(event.target.value)}
+                required
+              />
+            </label>
+          </section>
 
-          <label className="generate-bill-field">
-            <span>Tax rate (%)</span>
-
-            <input
-              type="number"
-              min="0"
-              max="100"
-              step="0.01"
-              value={taxRate}
-              onChange={(event) => setTaxRate(event.target.value)}
-              required
-            />
-          </label>
-
-          <div className="generate-bill-totals">
+          <section className="generate-bill-totals">
             <div>
               <span>Subtotal</span>
               <strong>{money(subtotal)}</strong>
             </div>
-
-            {cancelledAmount > 0 && (
-              <div>
-                <span>Cancelled items (excluded)</span>
-                <strong>{money(cancelledAmount)}</strong>
-              </div>
-            )}
-
             <div>
               <span>Discount</span>
-              <strong>−{money(valid ? discountAmount : 0)}</strong>
+              <strong>− {money(valid ? discountAmount : 0)}</strong>
             </div>
-
             <div>
-              <span>Tax</span>
+              <span>Tax ({valid ? rate : 0}%)</span>
               <strong>{money(tax)}</strong>
             </div>
-
             <div className="generate-bill-grand-total">
               <span>Total due</span>
               <strong>{money(total)}</strong>
             </div>
-          </div>
+          </section>
 
           {!valid && (
             <p className="generate-bill-error">
-              Enter a valid discount not exceeding the subtotal and a tax rate
+              Enter a discount between ₹0 and the subtotal, and a tax rate
               between 0% and 100%.
             </p>
           )}
-
           {error && <p className="generate-bill-error">{error}</p>}
 
-          <button
-            type="submit"
-            className="generate-bill-submit"
-            disabled={!valid || saving || !branchId || orders.length === 0}
-          >
-            {saving ? "Generating..." : "Generate bill"}
-          </button>
+          <footer className="generate-bill-footer">
+            <button
+              type="button"
+              className="generate-bill-cancel"
+              onClick={onClose}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="generate-bill-submit"
+              disabled={!valid || saving || !branchId || itemCount === 0}
+            >
+              {saving ? "Generating bill…" : `Generate bill · ${money(total)}`}
+            </button>
+          </footer>
         </form>
       </section>
     </div>

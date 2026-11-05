@@ -7,6 +7,7 @@ const formatMoney = (amount) =>
     style: "currency",
     currency: "INR",
     minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(Number(amount || 0));
 
 const formatDate = (value) =>
@@ -20,52 +21,37 @@ const formatDate = (value) =>
 const isCancelled = (item) =>
   String(item.status || "pending").toLowerCase() === "cancelled";
 
-const getItemTotal = (item) => {
-  if (item.line_total != null) {
-    return Number(item.line_total);
-  }
-
-  return Number(item.unit_price || 0) * Number(item.quantity || 0);
-};
+const getItemTotal = (item) =>
+  item.line_total != null
+    ? Number(item.line_total)
+    : Number(item.unit_price || 0) * Number(item.quantity || 0);
 
 export default function BillReceipt({ bill, order, restaurant, branch }) {
   const navigate = useNavigate();
 
-  // New session bills use bill.orders.
-  // Older bills continue to use bill.order or the supplied order prop.
   const orders = useMemo(() => {
-    if (Array.isArray(bill?.orders) && bill.orders.length > 0) {
+    if (Array.isArray(bill?.orders) && bill.orders.length > 0)
       return bill.orders;
-    }
-
     const legacyOrder = bill?.order || order;
-
     return legacyOrder ? [legacyOrder] : [];
   }, [bill, order]);
 
-  const allItems = useMemo(
+  // A receipt contains payable items only. Cancelled items remain in order history.
+  const billOrders = useMemo(
     () =>
-      orders.flatMap((currentOrder) =>
-        (currentOrder.items || []).map((item) => ({
-          ...item,
-          receiptOrderId: currentOrder.id,
-          receiptOrderNumber:
-            currentOrder.order_number || `#${currentOrder.id}`,
-        })),
-      ),
+      orders
+        .map((currentOrder) => ({
+          ...currentOrder,
+          items: (currentOrder.items || []).filter(
+            (item) => !isCancelled(item),
+          ),
+        }))
+        .filter((currentOrder) => currentOrder.items.length > 0),
     [orders],
   );
 
-  const cancelledItems = useMemo(
-    () => allItems.filter(isCancelled),
-    [allItems],
-  );
-
   const paymentStatus = String(bill?.payment_status || "unpaid").toLowerCase();
-
   const isPaid = paymentStatus === "paid";
-  const cancelledAmount = Number(bill?.cancelled_amount || 0);
-
   const firstOrder = orders[0];
 
   const customerNames = [
@@ -78,7 +64,7 @@ export default function BillReceipt({ bill, order, restaurant, branch }) {
     return (
       <main className="receipt-page">
         <div className="receipt-empty">
-          <h2>Receipt unavailable</h2>
+          <h2>Bill unavailable</h2>
           <p>Bill or order details could not be loaded.</p>
           <button onClick={() => navigate(-1)}>Go back</button>
         </div>
@@ -92,24 +78,18 @@ export default function BillReceipt({ bill, order, restaurant, branch }) {
         <button className="receipt-back" onClick={() => navigate(-1)}>
           ← Back
         </button>
-
         <button className="receipt-print" onClick={() => window.print()}>
-          <span aria-hidden="true">⎙</span>
-          Print Receipt
+          <span aria-hidden="true">⎙</span> Print Receipt
         </button>
       </div>
 
       <article className="receipt-paper">
         <header className="receipt-header">
           <div className="receipt-brand-mark">SM</div>
-
           <h1>{restaurant?.name || "Restaurant"}</h1>
-
           {branch?.name && <p className="receipt-branch">{branch.name}</p>}
-
           {branch?.address && <p>{branch.address}</p>}
           {branch?.phone && <p>Phone: {branch.phone}</p>}
-
           <div className="receipt-badge">
             {isPaid ? "PAYMENT RECEIPT" : "BILL — PAYMENT NOT RECEIVED"}
           </div>
@@ -120,7 +100,6 @@ export default function BillReceipt({ bill, order, restaurant, branch }) {
             <span>Bill number</span>
             <strong>{bill.bill_number}</strong>
           </div>
-
           <div>
             <span>{orders.length > 1 ? "Orders" : "Order number"}</span>
             <strong>
@@ -129,24 +108,20 @@ export default function BillReceipt({ bill, order, restaurant, branch }) {
                 : firstOrder.order_number || firstOrder.id}
             </strong>
           </div>
-
           <div>
             <span>Table</span>
             <strong>{firstOrder.table_number || "—"}</strong>
           </div>
-
           <div>
             <span>Date</span>
             <strong>{formatDate(bill.created_at)}</strong>
           </div>
-
           {customerNames.length > 0 && (
             <div>
               <span>Customer</span>
               <strong>{customerNames.join(", ")}</strong>
             </div>
           )}
-
           {bill.dining_session_id && (
             <div>
               <span>Dining session</span>
@@ -156,165 +131,70 @@ export default function BillReceipt({ bill, order, restaurant, branch }) {
         </div>
 
         <div className="receipt-items">
-          {orders.map((currentOrder) => {
-            const items = currentOrder.items || [];
-
-            return (
-              <section className="receipt-order-section" key={currentOrder.id}>
+          {billOrders.map((currentOrder, orderIndex) => (
+            <section className="receipt-order-section" key={currentOrder.id}>
+              {orders.length > 1 && (
                 <div className="receipt-order-title">
-                  <strong>
-                    Order {currentOrder.order_number || `#${currentOrder.id}`}
-                  </strong>
-
-                  {currentOrder.table_number && (
-                    <span>Table {currentOrder.table_number}</span>
-                  )}
+                  <strong>Order {orderIndex + 1}</strong>
                 </div>
-
-                <div className="receipt-items-heading">
-                  <span>Item</span>
-                  <span>Qty</span>
-                  <span>Price</span>
-                  <span>Total</span>
+              )}
+              <div className="receipt-items-heading">
+                <span>Item</span>
+                <span>Qty</span>
+                <span>Price</span>
+                <span>Total</span>
+              </div>
+              {currentOrder.items.map((item, index) => (
+                <div
+                  className="receipt-item"
+                  key={item.id ?? `${currentOrder.id}-${index}`}
+                >
+                  <span>
+                    {item.dish_name || "Menu item"}
+                    {item.special_instructions && (
+                      <small style={{ display: "block" }}>
+                        Note: {item.special_instructions}
+                      </small>
+                    )}
+                  </span>
+                  <span>{item.quantity}</span>
+                  <span>{formatMoney(item.unit_price)}</span>
+                  <span>{formatMoney(getItemTotal(item))}</span>
                 </div>
+              ))}
+            </section>
+          ))}
 
-                {items.map((item, index) => {
-                  const cancelled = isCancelled(item);
-
-                  return (
-                    <div
-                      className={`receipt-item ${
-                        cancelled ? "receipt-item-cancelled" : ""
-                      }`}
-                      key={
-                        item.id ??
-                        `${currentOrder.id}-${item.dish_name}-${index}`
-                      }
-                      style={
-                        cancelled
-                          ? {
-                              color: "#8b8b8b",
-                              background: "#fafafa",
-                              textDecoration: "line-through",
-                            }
-                          : undefined
-                      }
-                    >
-                      <span>
-                        {item.dish_name || "Menu item"}
-
-                        {cancelled && (
-                          <small
-                            className="receipt-cancelled-label"
-                            style={{
-                              display: "block",
-                              color: "#b45309",
-                              fontWeight: 700,
-                              textDecoration: "none",
-                            }}
-                          >
-                            Cancelled · Not charged
-                          </small>
-                        )}
-
-                        {item.special_instructions && (
-                          <small
-                            style={{
-                              display: "block",
-                              textDecoration: "none",
-                            }}
-                          >
-                            Note: {item.special_instructions}
-                          </small>
-                        )}
-                      </span>
-
-                      <span>{item.quantity}</span>
-                      <span>{formatMoney(item.unit_price)}</span>
-                      <span>{formatMoney(getItemTotal(item))}</span>
-                    </div>
-                  );
-                })}
-
-                {items.length === 0 && (
-                  <p className="receipt-no-items">No items in this order.</p>
-                )}
-              </section>
-            );
-          })}
-        </div>
-
-        {cancelledItems.length > 0 && (
-          <section
-            className="receipt-cancellation-summary"
-            style={{
-              marginTop: 16,
-              padding: 12,
-              border: "1px solid #f1d5a8",
-              borderRadius: 8,
-              background: "#fffaf1",
-            }}
-          >
-            <strong style={{ color: "#92400e" }}>Cancellation details</strong>
-
-            <p style={{ margin: "6px 0 0", color: "#6b5a43" }}>
-              {cancelledItems.length} item
-              {cancelledItems.length === 1 ? "" : "s"} cancelled across{" "}
-              {orders.length} order
-              {orders.length === 1 ? "" : "s"}. Cancelled items are retained for
-              order history and are excluded from the payable total.
+          {billOrders.length === 0 && (
+            <p className="receipt-no-items">
+              There are no payable items in this bill.
             </p>
-
-            {bill.cancelled_by && (
-              <p style={{ margin: "6px 0 0" }}>
-                <span>Cancelled by: </span>
-                <strong>{String(bill.cancelled_by).toUpperCase()}</strong>
-              </p>
-            )}
-
-            {bill.cancelled_at && (
-              <p style={{ margin: "4px 0 0" }}>
-                <span>Cancellation date: </span>
-                <strong>{formatDate(bill.cancelled_at)}</strong>
-              </p>
-            )}
-          </section>
-        )}
+          )}
+        </div>
 
         <section className="receipt-totals">
           <div>
             <span>Subtotal</span>
             <strong>{formatMoney(bill.subtotal)}</strong>
           </div>
-
-          {cancelledAmount > 0 && (
-            <div className="receipt-cancelled-total">
-              <span>Cancelled amount (not charged)</span>
-              <strong>{formatMoney(cancelledAmount)}</strong>
-            </div>
-          )}
-
           {Number(bill.discount_amount) > 0 && (
             <div>
               <span>Discount</span>
               <strong>−{formatMoney(bill.discount_amount)}</strong>
             </div>
           )}
-
           <div>
             <span>Tax</span>
             <strong>{formatMoney(bill.tax_amount)}</strong>
           </div>
-
           <div className="receipt-grand-total">
-            <span>Payable total</span>
+            <span>Total due</span>
             <strong>{formatMoney(bill.total_amount)}</strong>
           </div>
         </section>
 
         <section className="receipt-payment">
           <span>Payment status</span>
-
           <strong
             className={`payment-status ${isPaid ? "is-paid" : "is-unpaid"}`}
           >
@@ -330,7 +210,6 @@ export default function BillReceipt({ bill, order, restaurant, branch }) {
                 {String(bill.payment_method || "").toUpperCase() || "—"}
               </strong>
             </div>
-
             <div>
               <span>Paid at</span>
               <strong>{formatDate(bill.paid_at)}</strong>
