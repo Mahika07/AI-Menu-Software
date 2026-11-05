@@ -799,7 +799,7 @@ function Orders() {
                 const groups = [];
                 const sessionIndexes = new Map();
 
-                visibleOrders.forEach((order) => {
+                orders.forEach((order) => {
                   if (order.dining_session_id == null) {
                     groups.push({
                       key: `order-${order.id ?? order.order_number}`,
@@ -822,7 +822,13 @@ function Orders() {
                   }
                 });
 
-                return groups.map((group) => {
+                const filteredGroups = statusFilter
+                  ? groups.filter((group) =>
+                      group.orders.some((entry) => entry.status === statusFilter),
+                    )
+                  : groups;
+
+                return filteredGroups.map((group) => {
                   const groupOrders = group.orders;
                   const firstOrder = groupOrders[0];
                   const existingBill = groupOrders
@@ -870,13 +876,15 @@ function Orders() {
                     0,
                   );
 
-                  const groupStatus = groupOrders.every(
-                    (entry) => entry.status === "completed",
+                  const groupStatus = groupOrders.every((entry) =>
+                    ["completed", "cancelled"].includes(
+                      String(entry.status || "").toLowerCase(),
+                    ),
                   )
-                    ? "completed"
-                    : groupOrders.every((entry) => entry.status === "cancelled")
-                      ? "cancelled"
-                      : "preparing";
+                    ? groupOrders.some((entry) => entry.status === "completed")
+                      ? "completed"
+                      : "cancelled"
+                    : "preparing";
 
                   return (
                     <article
